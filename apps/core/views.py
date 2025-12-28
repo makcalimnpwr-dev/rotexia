@@ -14,6 +14,7 @@ from datetime import date
 import json
 from django.db.models import Count, Q as DQ
 from django.http import HttpResponseForbidden
+from django.http import HttpResponse
 from apps.users.hierarchy_access import get_hierarchy_scope_for_user
 from apps.users.utils import ensure_root_admin_configured, get_assigned_user_ids_under_admin_node, is_root_admin
 
@@ -226,6 +227,13 @@ def home(request):
             }
         }
         return render(request, 'apps/core/home.html', context)
+
+
+def healthz(request):
+    """
+    Render/healthcheck endpoint. Always returns 200.
+    """
+    return HttpResponse("ok", content_type="text/plain")
 
 # --- MOBİL ANASAYFA ---
 @login_required

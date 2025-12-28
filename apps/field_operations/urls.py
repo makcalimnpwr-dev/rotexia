@@ -38,6 +38,9 @@ urlpatterns = [
     path('reports/surveys/<int:survey_id>/create/', views.survey_report_create, name='survey_report_create'),
     path('reports/surveys/<int:survey_id>/', views.survey_report, name='survey_report'),
     path('reports/surveys/<int:survey_id>/export/', views.survey_report_export, name='survey_report_export'),
+    path('reports/surveys/<int:survey_id>/import/', views.survey_report_import, name='survey_report_import'),
+    path('reports/surveys/<int:survey_id>/submission/<int:task_id>/edit/', views.survey_submission_edit, name='survey_submission_edit'),
+    path('reports/surveys/<int:survey_id>/submission/<int:task_id>/delete/', views.survey_submission_delete, name='survey_submission_delete'),
 
     # --- ÇÖP KUTUSU (Raporlar) ---
     path('reports/trash/', views.reports_trash, name='reports_trash'),

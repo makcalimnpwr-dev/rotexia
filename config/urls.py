@@ -9,6 +9,9 @@ urlpatterns = [
     # 1. Admin Paneli
     path('admin/', admin.site.urls),
 
+    # Health check (Render)
+    path('healthz/', core_views.healthz, name='healthz'),
+
     # PWA
     path('manifest.webmanifest', TemplateView.as_view(
         template_name='pwa/manifest.webmanifest',

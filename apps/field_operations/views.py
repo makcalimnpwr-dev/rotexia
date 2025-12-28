@@ -7,7 +7,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import HttpResponse, HttpResponseRedirect, JsonResponse # YENİ: Yönlendirme için
-from django.db.models import Q
+from django.db.models import Q, F, OuterRef, Subquery
 from django.db.models import Count, Min, Max
 from django.core.paginator import Paginator
 from django.views.decorators.clickjacking import xframe_options_sameorigin
@@ -29,6 +29,47 @@ from apps.users.models import AuthorityNode
 
 User = get_user_model()
 CYCLE_START_DATE = date(2025, 12, 22)
+
+def _truthy_qp(val: str | None) -> bool:
+    """
+    Parse truthy query param values (e.g. ?x=1, ?x=on, ?x=true).
+    """
+    if val is None:
+        return False
+    v = str(val).strip().lower()
+    return v in {"1", "true", "on", "yes"}
+
+
+def _apply_latest_only_per_customer(
+    *,
+    base_qs,
+    survey: Survey,
+    scope_usernames: list[str] | None,
+    start_date: date | None,
+    end_date: date | None,
+):
+    """
+    For survey reports: keep only the latest VisitTask per customer within the filtered queryset.
+    This ensures repeating stores (customers) appear once with their most recent filled survey.
+    """
+    inner = (
+        VisitTask.objects.filter(customer_id=OuterRef("customer_id"))
+        .filter(answers__question__survey=survey)
+        .exclude(check_in_time__isnull=True)
+    )
+    if scope_usernames:
+        inner = inner.filter(merch_code__in=scope_usernames)
+    if start_date and end_date:
+        inner = inner.filter(check_in_time__date__gte=start_date, check_in_time__date__lte=end_date)
+
+    inner = inner.order_by("-check_in_time", "-id").values("id")[:1]
+
+    return (
+        base_qs.annotate(_latest_task_id=Subquery(inner))
+        .filter(id=F("_latest_task_id"))
+        .distinct()
+        .order_by("-check_in_time", "-id")
+    )
 
 # --- 1. GÖREV LİSTESİ ---
 @login_required
@@ -830,6 +871,9 @@ def _visit_detail_report_columns():
     """
     cols = []
 
+    # System / row identifier (required in all reports)
+    cols.append({"key": "answer_id", "label": "Cevap ID", "group": "Sistem"})
+
     # Customer fixed fields (Müşteriler ekranındaki başlıklar)
     customer_fixed = [
         ("customer_code", "Müşteri Kodu"),
@@ -879,6 +923,9 @@ def _task_to_report_value(
     hierarchy_parent_by_username: dict[str, str] | None = None,
 ) -> str:
     c = task.customer
+    if col_key == "answer_id":
+        # Stable unique ID for this report row (VisitTask-based submission ID)
+        return f"A-{task.id}"
     if col_key == "customer_code":
         return c.customer_code or ""
     if col_key == "customer_name":
@@ -1020,6 +1067,7 @@ def visit_detail_report(request):
 
     if not selected_cols:
         selected_cols = [
+            "answer_id",
             "customer_code",
             "customer_name",
             "visit_start_date",
@@ -1028,6 +1076,10 @@ def visit_detail_report(request):
             "visit_end_time",
             "visit_duration_min",
         ]
+    # Force required ID column to always be present and first
+    if "answer_id" not in selected_cols:
+        selected_cols = ["answer_id"] + [c for c in selected_cols if c != "answer_id"]
+        _save_cols_to_session(request, selected_cols)
 
     # Queryset (hierarchy scope + date filter)
     qs = VisitTask.objects.select_related("customer", "customer__cari").all()
@@ -1279,6 +1331,8 @@ def survey_report(request, survey_id: int):
     cols, label_by_key = _survey_report_columns(survey)
     available_keys = set(label_by_key.keys())
 
+    latest_only = _truthy_qp(request.GET.get("latest_only"))
+
     raw_cols = (request.GET.get("cols") or "").strip()
     if raw_cols:
         selected_cols = [c for c in raw_cols.split(",") if c]
@@ -1290,6 +1344,7 @@ def survey_report(request, survey_id: int):
     if not selected_cols:
         # Default = visit essentials + all survey questions appended
         default_base = [
+            "answer_id",
             "customer_code",
             "customer_name",
             "personel",
@@ -1303,6 +1358,10 @@ def survey_report(request, survey_id: int):
         ]
         q_cols = [c["key"] for c in cols if c["key"].startswith("q_")]
         selected_cols = [k for k in default_base if k in available_keys] + q_cols
+    # Force required ID column to always be present and first
+    if "answer_id" not in selected_cols:
+        selected_cols = ["answer_id"] + [c for c in selected_cols if c != "answer_id"]
+        _save_survey_cols_to_session(request, survey_id, selected_cols)
 
     # Queryset (hierarchy scope + date filter + survey answers)
     qs = (
@@ -1319,6 +1378,14 @@ def survey_report(request, survey_id: int):
         qs = qs.filter(check_in_time__date__gte=start_date, check_in_time__date__lte=end_date)
 
     qs = qs.order_by("-check_in_time", "-id")
+    if latest_only:
+        qs = _apply_latest_only_per_customer(
+            base_qs=qs,
+            survey=survey,
+            scope_usernames=list(scope.usernames) if scope.usernames else None,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
     preview_limit = 500
     tasks = list(qs[:preview_limit])
@@ -1329,18 +1396,19 @@ def survey_report(request, survey_id: int):
     headers = [{"key": k, "label": label_by_key.get(k, k)} for k in selected_cols]
     rows = []
     for t in tasks:
-        rows.append(
-            {
-                k: _task_to_survey_report_value(
-                    t,
-                    k,
-                    answers_map=answers_map,
-                    user_fullname_by_username=user_fullname_by_username,
-                    hierarchy_parent_by_username=hierarchy_parent_by_username,
-                )
-                for k in selected_cols
-            }
-        )
+        row = {
+            k: _task_to_survey_report_value(
+                t,
+                k,
+                answers_map=answers_map,
+                user_fullname_by_username=user_fullname_by_username,
+                hierarchy_parent_by_username=hierarchy_parent_by_username,
+            )
+            for k in selected_cols
+        }
+        # For UI actions (edit/delete)
+        row["__task_id"] = t.id
+        rows.append(row)
 
     total_count = qs.count()
     return render(
@@ -1351,6 +1419,7 @@ def survey_report(request, survey_id: int):
             "report_id": rec.id,
             "start_date": start_date,
             "end_date": end_date,
+            "latest_only": latest_only,
             "columns": cols,
             "selected_cols": selected_cols,
             "headers": headers,
@@ -1384,6 +1453,8 @@ def survey_report_export(request, survey_id: int):
     cols, label_by_key = _survey_report_columns(survey)
     available_keys = set(label_by_key.keys())
 
+    latest_only = _truthy_qp(request.GET.get("latest_only"))
+
     raw_cols = (request.GET.get("cols") or "").strip()
     if raw_cols:
         selected_cols = [c for c in raw_cols.split(",") if c]
@@ -1394,6 +1465,7 @@ def survey_report_export(request, survey_id: int):
 
     if not selected_cols:
         default_base = [
+            "answer_id",
             "customer_code",
             "customer_name",
             "personel",
@@ -1407,6 +1479,10 @@ def survey_report_export(request, survey_id: int):
         ]
         q_cols = [c["key"] for c in cols if c["key"].startswith("q_")]
         selected_cols = [k for k in default_base if k in available_keys] + q_cols
+    # Force required ID column to always be present and first
+    if "answer_id" not in selected_cols:
+        selected_cols = ["answer_id"] + [c for c in selected_cols if c != "answer_id"]
+        _save_survey_cols_to_session(request, survey_id, selected_cols)
 
     qs = (
         VisitTask.objects.select_related("customer", "customer__cari")
@@ -1420,6 +1496,14 @@ def survey_report_export(request, survey_id: int):
     if start_date and end_date:
         qs = qs.filter(check_in_time__date__gte=start_date, check_in_time__date__lte=end_date)
     qs = qs.order_by("-check_in_time", "-id")
+    if latest_only:
+        qs = _apply_latest_only_per_customer(
+            base_qs=qs,
+            survey=survey,
+            scope_usernames=list(scope.usernames) if scope.usernames else None,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
     # Build maps for all usernames in export queryset
     usernames = list(qs.values_list("merch_code", flat=True).distinct())
@@ -1467,6 +1551,280 @@ def survey_report_export(request, survey_id: int):
     response["Content-Disposition"] = f"attachment; filename={filename}"
     df.to_excel(response, index=False)
     return response
+
+
+def _get_accessible_survey_task_or_404(request, *, survey: Survey, task_id: int) -> VisitTask:
+    """
+    Returns a VisitTask that:
+    - is within user's hierarchy scope
+    - has at least one answer for the given survey
+    """
+    qs = (
+        VisitTask.objects.select_related("customer", "customer__cari")
+        .filter(id=task_id, answers__question__survey=survey)
+        .exclude(check_in_time__isnull=True)
+        .distinct()
+    )
+    scope = get_hierarchy_scope_for_user(request.user, include_self=True)
+    if scope.usernames:
+        qs = qs.filter(merch_code__in=scope.usernames)
+    return get_object_or_404(qs, id=task_id)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def survey_submission_edit(request, survey_id: int, task_id: int):
+    """
+    Edit a single survey submission (answers) identified by VisitTask.id (Cevap ID).
+    Allows updating text answers and replacing photo answers.
+    """
+    survey = get_object_or_404(Survey, pk=survey_id)
+    task = _get_accessible_survey_task_or_404(request, survey=survey, task_id=task_id)
+    questions = list(Question.objects.filter(survey=survey).order_by("order", "id"))
+
+    # Build latest answer per question
+    latest_answers = {}
+    for a in (
+        SurveyAnswer.objects.select_related("question")
+        .filter(task=task, question__survey=survey)
+        .order_by("-id")
+    ):
+        qid = a.question_id
+        if qid not in latest_answers:
+            latest_answers[qid] = a
+
+    if request.method == "POST":
+        with transaction.atomic():
+            for q in questions:
+                field = f"q_{q.id}"
+                existing = latest_answers.get(q.id)
+
+                # Photo update
+                if q.input_type == "photo":
+                    uploaded = request.FILES.get(field)
+                    if uploaded:
+                        if not existing:
+                            existing = SurveyAnswer.objects.create(task=task, question=q)
+                            latest_answers[q.id] = existing
+                        existing.answer_photo = uploaded
+                        existing.answer_text = None
+                        existing.save(update_fields=["answer_photo", "answer_text"])
+                    continue
+
+                # Text/select update
+                incoming = (request.POST.get(field) or "").strip()
+                if not existing:
+                    existing = SurveyAnswer.objects.create(task=task, question=q)
+                    latest_answers[q.id] = existing
+                existing.answer_text = incoming
+                # Don't touch photo for non-photo questions
+                existing.save(update_fields=["answer_text"])
+
+        messages.success(request, "Cevap güncellendi.")
+        nxt = (request.POST.get("next") or "").strip()
+        return redirect(nxt or "survey_report", survey_id=survey.id)
+
+    # Build view model for template
+    q_rows = []
+    for q in questions:
+        a = latest_answers.get(q.id)
+        photo_url = ""
+        if a and getattr(a, "answer_photo", None):
+            try:
+                photo_url = a.answer_photo.url
+            except Exception:
+                photo_url = ""
+        q_rows.append(
+            {
+                "question": q,
+                "field": f"q_{q.id}",
+                "value": (a.answer_text if a else "") or "",
+                "photo_url": photo_url,
+            }
+        )
+
+    return render(
+        request,
+        "apps/reports/survey_submission_edit.html",
+        {
+            "survey": survey,
+            "task": task,
+            "answer_id": f"A-{task.id}",
+            "questions": q_rows,
+            "next": (request.GET.get("next") or "").strip(),
+        },
+    )
+
+
+@login_required
+@require_POST
+def survey_submission_delete(request, survey_id: int, task_id: int):
+    """
+    Delete a survey submission from reports by deleting its SurveyAnswer rows
+    (does NOT delete the VisitTask itself).
+    """
+    survey = get_object_or_404(Survey, pk=survey_id)
+    task = _get_accessible_survey_task_or_404(request, survey=survey, task_id=task_id)
+    SurveyAnswer.objects.filter(task=task, question__survey=survey).delete()
+    messages.success(request, "Cevap silindi.")
+    nxt = (request.GET.get("next") or request.POST.get("next") or "").strip()
+    return redirect(nxt or "survey_report", survey_id=survey.id)
+
+
+@login_required
+@require_POST
+def survey_report_import(request, survey_id: int):
+    """
+    Import survey answers from an Excel file using 'Cevap ID' column (A-<task_id>).
+    - Updates only provided non-empty cells for text/select questions (photo questions are ignored).
+    - If a row has Cevap ID but all other provided columns are empty => delete that submission (answers).
+    Shows a summary like: '34 revize edildi, 1 silindi'.
+    """
+    survey = get_object_or_404(Survey, pk=survey_id)
+    upload = request.FILES.get("file")
+    if not upload:
+        messages.error(request, "Dosya seçilmedi.")
+        return redirect("survey_report", survey_id=survey.id)
+
+    try:
+        df = pd.read_excel(upload)
+    except Exception:
+        messages.error(request, "Excel okunamadı. Lütfen .xlsx formatında yükleyin.")
+        return redirect("survey_report", survey_id=survey.id)
+
+    cols, label_by_key = _survey_report_columns(survey)
+    reverse_label = {v: k for k, v in label_by_key.items() if v}
+
+    # Identify ID column
+    id_col = None
+    for cand in ["Cevap ID", "cevap id", "Answer ID", "answer_id"]:
+        for c in df.columns:
+            if str(c).strip().lower() == str(cand).strip().lower():
+                id_col = c
+                break
+        if id_col is not None:
+            break
+    if id_col is None:
+        messages.error(request, "Excel'de 'Cevap ID' sütunu bulunamadı.")
+        return redirect("survey_report", survey_id=survey.id)
+
+    # Which columns can be imported? Only survey question columns and only non-photo questions.
+    q_by_key = {f"q_{q.id}": q for q in Question.objects.filter(survey=survey).order_by("order", "id")}
+    import_keys = []
+    for c in df.columns:
+        if c == id_col:
+            continue
+        key = reverse_label.get(str(c))
+        if key and key in q_by_key and q_by_key[key].input_type != "photo":
+            import_keys.append(key)
+
+    if not import_keys:
+        messages.error(request, "Excel'de güncellenecek soru kolonu bulunamadı (fotoğraf kolonları hariç).")
+        return redirect("survey_report", survey_id=survey.id)
+
+    def _parse_task_id(v) -> int | None:
+        if v is None:
+            return None
+        s = str(v).strip()
+        if not s:
+            return None
+        m = re.search(r"(\\d+)", s)
+        if not m:
+            return None
+        try:
+            return int(m.group(1))
+        except Exception:
+            return None
+
+    task_ids = []
+    for _, row in df.iterrows():
+        tid = _parse_task_id(row.get(id_col))
+        if tid:
+            task_ids.append(tid)
+    task_ids = list({t for t in task_ids if t})
+
+    scope = get_hierarchy_scope_for_user(request.user, include_self=True)
+    accessible_tasks = VisitTask.objects.filter(id__in=task_ids, answers__question__survey=survey).distinct()
+    if scope.usernames:
+        accessible_tasks = accessible_tasks.filter(merch_code__in=scope.usernames)
+    accessible_by_id = {t.id: t for t in accessible_tasks}
+
+    # Preload existing latest answers per (task_id, question_id)
+    q_ids = [int(k.replace("q_", "", 1)) for k in import_keys]
+    existing_answers = (
+        SurveyAnswer.objects.filter(task_id__in=accessible_by_id.keys(), question_id__in=q_ids)
+        .order_by("task_id", "question_id", "-id")
+    )
+    latest_answer_by_pair = {}
+    for a in existing_answers:
+        pair = (a.task_id, a.question_id)
+        if pair not in latest_answer_by_pair:
+            latest_answer_by_pair[pair] = a
+
+    revised = 0
+    deleted = 0
+    skipped = 0
+
+    with transaction.atomic():
+        for _, row in df.iterrows():
+            tid = _parse_task_id(row.get(id_col))
+            if not tid:
+                continue
+            task = accessible_by_id.get(tid)
+            if not task:
+                skipped += 1
+                continue
+
+            # Determine if this row is a delete instruction (all provided import cells empty)
+            any_value = False
+            for k in import_keys:
+                label = label_by_key.get(k, k)
+                v = row.get(label)
+                if v is None:
+                    continue
+                if isinstance(v, float) and pd.isna(v):
+                    continue
+                if str(v).strip() != "":
+                    any_value = True
+                    break
+
+            if not any_value:
+                SurveyAnswer.objects.filter(task=task, question__survey=survey).delete()
+                deleted += 1
+                continue
+
+            did_update = False
+            for k in import_keys:
+                q = q_by_key.get(k)
+                if not q:
+                    continue
+                label = label_by_key.get(k, k)
+                v = row.get(label)
+                if v is None:
+                    continue
+                if isinstance(v, float) and pd.isna(v):
+                    continue
+                s = str(v).strip()
+                if s == "":
+                    # If cell is blank, do not change existing value (safe behavior)
+                    continue
+
+                pair = (task.id, q.id)
+                a = latest_answer_by_pair.get(pair)
+                if not a:
+                    a = SurveyAnswer.objects.create(task=task, question=q, answer_text=s)
+                    latest_answer_by_pair[pair] = a
+                else:
+                    a.answer_text = s
+                    a.save(update_fields=["answer_text"])
+                did_update = True
+
+            if did_update:
+                revised += 1
+
+    messages.success(request, f"{revised} cevap revize edildi, {deleted} cevap silindi. (Atlanan: {skipped})")
+    nxt = (request.POST.get("next") or "").strip()
+    return redirect(nxt or "survey_report", survey_id=survey.id)
 
 
 # ----------------------------------------------------------------------------
@@ -1567,6 +1925,7 @@ def visit_detail_report_export(request):
         selected_cols = [c for c in _get_saved_cols_from_session(request) if c in available_keys]
     if not selected_cols:
         selected_cols = [
+            "answer_id",
             "customer_code",
             "customer_name",
             "visit_start_date",
@@ -1575,6 +1934,10 @@ def visit_detail_report_export(request):
             "visit_end_time",
             "visit_duration_min",
         ]
+    # Force required ID column to always be present and first
+    if "answer_id" not in selected_cols:
+        selected_cols = ["answer_id"] + [c for c in selected_cols if c != "answer_id"]
+        _save_cols_to_session(request, selected_cols)
 
     qs = VisitTask.objects.select_related("customer", "customer__cari").all()
     scope = get_hierarchy_scope_for_user(request.user, include_self=True)

@@ -20,6 +20,9 @@
     <a class="btn btn-success" href="{% url 'survey_report_export' survey.id %}?{{ request.GET.urlencode }}">
       <i class="fas fa-file-excel"></i> İndir
     </a>
+    <button class="btn btn-outline-primary" type="button" data-bs-toggle="modal" data-bs-target="#importModal">
+      <i class="fas fa-upload"></i> Yükle
+    </button>
   </div>
 </div>
 
@@ -35,6 +38,24 @@
       <div class="col-md-3">
         <label class="form-label fw-bold small">Bitiş Tarihi</label>
         <input type="date" class="form-control" name="end_date" value="{{ end_date|date:'Y-m-d' }}">
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label fw-bold small d-block">Son Ziyaretleri Göster</label>
+        <div class="form-check form-switch">
+          <input
+            class="form-check-input"
+            type="checkbox"
+            role="switch"
+            id="latestOnlySwitch"
+            name="latest_only"
+            value="1"
+            {% if latest_only %}checked{% endif %}
+          >
+          <label class="form-check-label" for="latestOnlySwitch">
+            Tekrarlayan mağazaları gizle (seçilen tarih aralığında en son doldurulan cevap)
+          </label>
+        </div>
       </div>
 
       <div class="col-md-3">
@@ -57,6 +78,7 @@
     <table class="table table-sm table-hover align-middle mb-0">
       <thead class="table-light">
         <tr>
+          <th>İşlem</th>
           {% for h in headers %}
             <th>{{ h.label }}</th>
           {% endfor %}
@@ -65,15 +87,64 @@
       <tbody>
         {% for r in rows %}
           <tr>
+            <td class="text-nowrap">
+              <a class="btn btn-sm btn-outline-primary"
+                 href="{% url 'survey_submission_edit' survey.id r|get_item:'__task_id' %}?next={{ request.get_full_path|urlencode }}">
+                <i class="fas fa-pen"></i> Düzenle
+              </a>
+              <form method="post"
+                    action="{% url 'survey_submission_delete' survey.id r|get_item:'__task_id' %}?next={{ request.get_full_path|urlencode }}"
+                    class="d-inline">
+                {% csrf_token %}
+                <button class="btn btn-sm btn-outline-danger" type="submit"
+                        onclick="return confirm('Bu cevap tamamen silinsin mi?');">
+                  <i class="fas fa-trash"></i> Sil
+                </button>
+              </form>
+            </td>
             {% for h in headers %}
               <td>{{ r|get_item:h.key }}</td>
             {% endfor %}
           </tr>
         {% empty %}
-          <tr><td colspan="{{ headers|length }}" class="text-center text-muted py-5">Kayıt bulunamadı.</td></tr>
+          <tr><td colspan="{{ headers|length|add:1 }}" class="text-center text-muted py-5">Kayıt bulunamadı.</td></tr>
         {% endfor %}
       </tbody>
     </table>
+  </div>
+</div>
+
+<!-- Import modal -->
+<div class="modal fade" id="importModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Excel Yükle (Cevap Güncelle)</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-info small mb-3">
+          <div class="fw-bold mb-1">Kurallar</div>
+          <div>- Excel’de <strong>Cevap ID</strong> sütunu zorunludur.</div>
+          <div>- Cevap ID’den sonra gelen kolonlarda dolu olan hücreler revize edilir (fotoğraf kolonları hariç).</div>
+          <div>- Cevap ID var ama tüm diğer hücreler boşsa, o cevap tamamen silinir.</div>
+        </div>
+        <form method="post" action="{% url 'survey_report_import' survey.id %}" enctype="multipart/form-data">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <div class="mb-3">
+            <label class="form-label fw-bold">Excel Dosyası (.xlsx)</label>
+            <input class="form-control" type="file" name="file" accept=".xlsx,.xls" required>
+          </div>
+          <div class="d-flex justify-content-end gap-2">
+            <button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Vazgeç</button>
+            <button class="btn btn-primary" type="submit" onclick="return confirm('Yüklenen Excel ile cevaplar güncellenecek/silinecek. Devam edilsin mi?');">
+              <i class="fas fa-upload"></i> Yükle ve Uygula
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 </div>
 

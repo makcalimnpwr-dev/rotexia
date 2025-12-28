@@ -3,6 +3,7 @@ Multi-Tenancy Middleware
 Her request'te tenant bilgisini otomatik olarak ayarlar
 """
 from django.utils.deprecation import MiddlewareMixin
+from django.db.utils import OperationalError, ProgrammingError
 from .models import Tenant
 
 
@@ -21,6 +22,14 @@ class TenantMiddleware(MiddlewareMixin):
         # Allow Render health checks (and other infra checks) to bypass tenancy/DB calls.
         # This prevents startup loops before migrations are applied.
         if request.path.startswith("/healthz"):
+            request.tenant = None
+            return None
+
+        # If DB is not ready (migrations not applied yet), do not break the whole app.
+        # Render will still be able to serve pages and we can run migrations from Shell.
+        try:
+            _ = Tenant.objects.all()[:1]
+        except (OperationalError, ProgrammingError):
             request.tenant = None
             return None
 

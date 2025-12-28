@@ -1,4 +1,3 @@
-import pandas as pd
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
@@ -11,6 +10,7 @@ from django.db.models import Q
 from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 import json
+from apps.core.excel_utils import xlsx_from_rows, xlsx_to_rows
 
 # --- AYARLAR ANA SAYFASI ---
 @login_required
@@ -203,15 +203,13 @@ def export_users(request):
             'E-posta': u.email,
             'Telefon': u.phone,
             'Rol': u.role.name if u.role else '', # Rolün adını al
-            'Aktif Durumu': u.is_active
+            'Aktif Durumu': u.is_active,
+            'Şifre': '',
         })
-    
-    df = pd.DataFrame(data)
-    df['Şifre'] = ''
-    
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+    content = xlsx_from_rows(data, sheet_name="Kullanıcılar")
+    response = HttpResponse(content, content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     response['Content-Disposition'] = 'attachment; filename=kullanici_listesi.xlsx'
-    df.to_excel(response, index=False)
     return response
 
 @login_required
@@ -219,9 +217,16 @@ def export_users(request):
 def import_users(request):
     if request.method == 'POST' and request.FILES.get('excel_file'):
         try:
-            df = pd.read_excel(request.FILES['excel_file'])
+            rows = xlsx_to_rows(request.FILES['excel_file'])
+            if not rows:
+                messages.error(request, "Excel boş veya okunamadı.")
+                return redirect('user_list')
             root_admin = get_root_admin_user()
-            for index, row in df.iterrows():
+
+            def _is_blank(v) -> bool:
+                return v is None or str(v).strip() == "" or str(v).strip().lower() == "nan"
+
+            for row in rows:
                 user_id = row.get('ID (DOKUNMAYIN)')
                 user_code = row.get('Kullanıcı Kodu')
                 
@@ -238,13 +243,13 @@ def import_users(request):
                     'email': row.get('E-posta'),
                     'phone': row.get('Telefon'),
                     'role': role_obj,
-                    'is_active': row.get('Aktif Durumu', True)
+                    'is_active': (row.get('Aktif Durumu', True) if not _is_blank(row.get('Aktif Durumu', None)) else True)
                 }
 
                 # Güncelleme veya Oluşturma
-                if pd.notna(user_id):
+                if not _is_blank(user_id):
                     try:
-                        user = CustomUser.objects.get(pk=user_id)
+                        user = CustomUser.objects.get(pk=int(float(str(user_id).strip())))
                         # Root Admin değiştirilemez
                         if root_admin and user.id == root_admin.id:
                             continue
@@ -252,7 +257,7 @@ def import_users(request):
                             setattr(user, key, value)
                         # Şifre varsa güncelle
                         pwd = row.get('Şifre')
-                        if pd.notna(pwd) and str(pwd).strip():
+                        if not _is_blank(pwd):
                             user.set_password(str(pwd))
                         user.save()
                     except: pass
@@ -263,7 +268,7 @@ def import_users(request):
                     defaults['username'] = user_code
                     defaults['user_code'] = user_code
                     pwd = row.get('Şifre')
-                    if not (pd.notna(pwd) and str(pwd).strip()):
+                    if _is_blank(pwd):
                         pwd = "123"
                     user = CustomUser.objects.create(**defaults)
                     user.set_password(str(pwd))

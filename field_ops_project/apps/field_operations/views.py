@@ -1,5 +1,8 @@
 import json
-import pandas as pd
+try:
+    import pandas as pd  # legacy; optional
+except Exception:  # pragma: no cover
+    pd = None
 import ast
 import re
 from datetime import date, datetime, timedelta
@@ -133,6 +136,9 @@ def import_tasks(request):
 
     if request.method == 'POST' and request.FILES.get('excel_file'):
         try:
+            if pd is None:
+                messages.error(request, "Excel import için pandas gerekli (legacy mod).")
+                return HttpResponseRedirect(referer)
             df = pd.read_excel(request.FILES['excel_file'])
             df = df.where(pd.notnull(df), None)
             updated_count = 0
@@ -256,6 +262,8 @@ def export_tasks(request):
 
     if not data: return HttpResponse("Veri yok.", content_type="text/plain")
     
+    if pd is None:
+        return HttpResponse("Excel export için pandas gerekli (legacy mod).", content_type="text/plain", status=500)
     df = pd.DataFrame(data)
     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     response['Content-Disposition'] = 'attachment; filename=gorev_listesi.xlsx'
@@ -633,6 +641,9 @@ def import_route_plan(request):
         print("\n=== DETAYLI EXCEL ANALİZİ (TRANSFER MODU) ===") 
         try:
             # ADIM 1: Excel'i Oku
+            if pd is None:
+                messages.error(request, "Rota excel import için pandas gerekli (legacy mod).")
+                return HttpResponseRedirect(referer)
             df = pd.read_excel(request.FILES['excel_file'], dtype=str)
             df.columns = df.columns.str.strip()
             

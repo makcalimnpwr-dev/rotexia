@@ -276,9 +276,9 @@ def mobile_home(request):
 def mobile_profile(request):
     return render(request, 'mobile/profile.html')
 
-import pandas as pd
 from django.http import HttpResponse
 from django.contrib.auth.decorators import login_required
+from apps.core.excel_utils import xlsx_from_rows
 
 @login_required
 def download_excel_template(request, template_type):
@@ -309,40 +309,29 @@ def download_excel_template(request, template_type):
         columns = ['Saha Kullanıcısı', 'Müşteri Kodu', 'Gün 1', 'Gün 2', 'Gün 3', 'Gün 4', 'Gün 5', 'Gün 6', 'Gün 7']
         filename = "rota_yukleme_sablonu.xlsx"
 
-    # 2. Veri Sözlüğünü Oluştur (HATA BURADAYDI, ŞİMDİ DÜZELTİLDİ)
-    # Tüm sütunlara varsayılan olarak 1 tane boş satır ekliyoruz ['']
-    # Böylece hepsi eşit uzunlukta oluyor.
-    data = {col: [''] for col in columns}
+    row = {col: "" for col in columns}
 
-    # 3. Örnek Verileri Doldur (Sadece gerekli olanları)
     if template_type == 'customer':
-        data['Müşteri Kodu'] = ['M-001']
-        data['Müşteri Adı'] = ['Örnek Market']
-        data['İl'] = ['İstanbul']
-        
+        row['Müşteri Kodu'] = 'M-001'
+        row['Müşteri Adı'] = 'Örnek Market'
+        row['İl'] = 'İstanbul'
     elif template_type == 'user':
-        data['Kullanıcı Kodu'] = ['Merch1']
-        data['Ad'] = ['Ahmet']
-        data['Rol'] = ['Saha Personeli']
-        data['Şifre'] = ['123456']
-        
+        row['Kullanıcı Kodu'] = 'Merch1'
+        row['Ad'] = 'Ahmet'
+        row['Rol'] = 'Saha Personeli'
+        row['Şifre'] = '123456'
     elif template_type == 'task':
-        data['Müşteri Kodu'] = ['M-001']
-        data['Personel'] = ['Merch1']
-        data['Tarih'] = ['25.12.2025']
-        
+        row['Müşteri Kodu'] = 'M-001'
+        row['Personel'] = 'Merch1'
+        row['Tarih'] = '25.12.2025'
     elif template_type == 'route':
-        data['Saha Kullanıcısı'] = ['Merch1']
-        data['Müşteri Kodu'] = ['M-001']
-        data['Gün 1'] = ['1']
+        row['Saha Kullanıcısı'] = 'Merch1'
+        row['Müşteri Kodu'] = 'M-001'
+        row['Gün 1'] = '1'
 
-    # DataFrame oluştur ve Excel olarak döndür
-    df = pd.DataFrame(data)
-    
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    content = xlsx_from_rows([row], sheet_name="Şablon", header_order=columns)
+    response = HttpResponse(content, content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     response['Content-Disposition'] = f'attachment; filename={filename}'
-    df.to_excel(response, index=False)
-    
     return response
 
 from django.shortcuts import get_object_or_404

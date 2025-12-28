@@ -5,5 +5,4 @@ Pillow==10.2.0          # Resim işleme
 gunicorn==21.2.0        # Canlı ortam sunucusu hazırlığı
 python-dotenv==1.0.0    # Gizli değişkenler için
 dj-database-url==2.1.0  # PostgreSQL connection string parsing
-pandas==2.2.3
 openpyxl==3.1.5

@@ -1,7 +1,7 @@
 import json
-import pandas as pd
 import ast
 import re
+from io import BytesIO
 from datetime import date, datetime, timedelta
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
@@ -26,6 +26,7 @@ from apps.customers.models import Customer
 from apps.customers.models import CustomFieldDefinition
 from apps.users.hierarchy_access import get_hierarchy_scope_for_user
 from apps.users.models import AuthorityNode
+from apps.core.excel_utils import xlsx_from_rows, xlsx_to_rows
 
 User = get_user_model()
 CYCLE_START_DATE = date(2025, 12, 22)
@@ -204,13 +205,12 @@ def import_tasks(request):
 
     if request.method == 'POST' and request.FILES.get('excel_file'):
         try:
-            df = pd.read_excel(request.FILES['excel_file'])
-            df = df.where(pd.notnull(df), None)
+            rows = xlsx_to_rows(request.FILES['excel_file'])
             updated_count = 0
             created_count = 0
-            cols = df.columns.tolist()
+            cols = list(rows[0].keys()) if rows else []
 
-            for index, row in df.iterrows():
+            for row in rows:
                 # ID Temizle
                 raw_id = row.get('Sistem ID')
                 task_id = None
@@ -224,7 +224,17 @@ def import_tasks(request):
                 c_day = 0
                 if raw_date and str(raw_date).strip() not in ['Tarihsiz', '', 'nan', 'NaT']:
                     try:
-                        p_date = pd.to_datetime(raw_date, dayfirst=True).date()
+                        if isinstance(raw_date, datetime):
+                            p_date = raw_date.date()
+                        elif isinstance(raw_date, date):
+                            p_date = raw_date
+                        else:
+                            # try parse dd.mm.yyyy or yyyy-mm-dd
+                            s = str(raw_date).strip()
+                            try:
+                                p_date = datetime.strptime(s, "%d.%m.%Y").date()
+                            except Exception:
+                                p_date = datetime.strptime(s, "%Y-%m-%d").date()
                         delta = (p_date - CYCLE_START_DATE).days
                         c_day = (delta % 28) + 1 if delta >= 0 else 0
                     except: p_date = None
@@ -326,11 +336,13 @@ def export_tasks(request):
         data.append(row)
 
     if not data: return HttpResponse("Veri yok.", content_type="text/plain")
-    
-    df = pd.DataFrame(data)
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+    content = xlsx_from_rows(data, sheet_name="Görevler")
+    response = HttpResponse(
+        content,
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
     response['Content-Disposition'] = 'attachment; filename=gorev_listesi.xlsx'
-    df.to_excel(response, index=False)
     return response
 
 # --- 5. TOPLU İŞLEMLER ---
@@ -1545,11 +1557,13 @@ def survey_report_export(request, survey_id: int):
             )
         data.append(row)
 
-    df = pd.DataFrame(data)
     filename = f"anket_raporu_{survey.id}_{(start_date or date.today()).strftime('%Y%m%d')}_{(end_date or date.today()).strftime('%Y%m%d')}.xlsx"
-    response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    content = xlsx_from_rows(data, sheet_name="Anket Raporu")
+    response = HttpResponse(
+        content,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
     response["Content-Disposition"] = f"attachment; filename={filename}"
-    df.to_excel(response, index=False)
     return response
 
 
@@ -1687,7 +1701,7 @@ def survey_report_import(request, survey_id: int):
         return redirect("survey_report", survey_id=survey.id)
 
     try:
-        df = pd.read_excel(upload)
+        rows = xlsx_to_rows(upload)
     except Exception:
         messages.error(request, "Excel okunamadı. Lütfen .xlsx formatında yükleyin.")
         return redirect("survey_report", survey_id=survey.id)
@@ -1698,7 +1712,7 @@ def survey_report_import(request, survey_id: int):
     # Identify ID column
     id_col = None
     for cand in ["Cevap ID", "cevap id", "Answer ID", "answer_id"]:
-        for c in df.columns:
+        for c in (rows[0].keys() if rows else []):
             if str(c).strip().lower() == str(cand).strip().lower():
                 id_col = c
                 break
@@ -1711,7 +1725,7 @@ def survey_report_import(request, survey_id: int):
     # Which columns can be imported? Only survey question columns and only non-photo questions.
     q_by_key = {f"q_{q.id}": q for q in Question.objects.filter(survey=survey).order_by("order", "id")}
     import_keys = []
-    for c in df.columns:
+    for c in (rows[0].keys() if rows else []):
         if c == id_col:
             continue
         key = reverse_label.get(str(c))
@@ -1737,7 +1751,7 @@ def survey_report_import(request, survey_id: int):
             return None
 
     task_ids = []
-    for _, row in df.iterrows():
+    for row in rows:
         tid = _parse_task_id(row.get(id_col))
         if tid:
             task_ids.append(tid)
@@ -1766,7 +1780,7 @@ def survey_report_import(request, survey_id: int):
     skipped = 0
 
     with transaction.atomic():
-        for _, row in df.iterrows():
+        for row in rows:
             tid = _parse_task_id(row.get(id_col))
             if not tid:
                 continue
@@ -1781,8 +1795,6 @@ def survey_report_import(request, survey_id: int):
                 label = label_by_key.get(k, k)
                 v = row.get(label)
                 if v is None:
-                    continue
-                if isinstance(v, float) and pd.isna(v):
                     continue
                 if str(v).strip() != "":
                     any_value = True
@@ -1801,8 +1813,6 @@ def survey_report_import(request, survey_id: int):
                 label = label_by_key.get(k, k)
                 v = row.get(label)
                 if v is None:
-                    continue
-                if isinstance(v, float) and pd.isna(v):
                     continue
                 s = str(v).strip()
                 if s == "":
@@ -1963,11 +1973,13 @@ def visit_detail_report_export(request):
             )
         data.append(row)
 
-    df = pd.DataFrame(data)
     filename = f"detayli_ziyaret_raporu_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx"
-    response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    content = xlsx_from_rows(data, sheet_name="Detaylı Ziyaret")
+    response = HttpResponse(
+        content,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
     response["Content-Disposition"] = f"attachment; filename={filename}"
-    df.to_excel(response, index=False)
     return response
 
 @login_required
@@ -2099,12 +2111,15 @@ def import_route_plan(request):
         print("\n=== DETAYLI EXCEL ANALİZİ (TRANSFER MODU) ===") 
         try:
             # ADIM 1: Excel'i Oku
-            df = pd.read_excel(request.FILES['excel_file'], dtype=str)
-            df.columns = df.columns.str.strip()
+            rows = xlsx_to_rows(request.FILES['excel_file'])
+            if not rows:
+                messages.error(request, "Excel boş veya okunamadı.")
+                return HttpResponseRedirect(referer)
+            columns = list(rows[0].keys())
             
             # Sütunları Bul
             day_columns = {} 
-            for col in df.columns:
+            for col in columns:
                 match = re.search(r'(?:G[uü]n)\s*(\d+)', col, re.IGNORECASE)
                 if match:
                     day_num = int(match.group(1))
@@ -2115,19 +2130,29 @@ def import_route_plan(request):
                 messages.error(request, "Excel'de 'Gün X' sütunları bulunamadı.")
                 return HttpResponseRedirect(referer)
 
-            merch_col = next((c for c in df.columns if 'Saha' in c or 'Personel' in c or 'Merch' in c), None)
+            merch_col = next((c for c in columns if 'Saha' in c or 'Personel' in c or 'Merch' in c), None)
             if not merch_col:
                 messages.error(request, "Personel sütunu bulunamadı.")
                 return HttpResponseRedirect(referer)
 
-            unique_merchs = df[merch_col].dropna().unique()
+            unique_merchs = []
+            seen_merchs = set()
+            for r in rows:
+                v = r.get(merch_col)
+                if v is None:
+                    continue
+                s = str(v).strip()
+                if not s or s.lower() == "nan":
+                    continue
+                if s not in seen_merchs:
+                    unique_merchs.append(s)
+                    seen_merchs.add(s)
             success_count = 0
             task_action_count = 0
             
             # --- VERİTABANI İŞLEMİ ---
             with transaction.atomic():
-                for merch_raw in unique_merchs:
-                    merch_name = str(merch_raw).strip()
+                for merch_name in unique_merchs:
                     if merch_name.lower() == 'nan': continue
                     
                     print(f"-> Personel: {merch_name}")
@@ -2144,9 +2169,9 @@ def import_route_plan(request):
                         r.save()
 
                     # 2. EKLEME VE GÖREV YÖNETİMİ
-                    merch_df = df[df[merch_col] == merch_raw]
+                    merch_rows = [r for r in rows if str(r.get(merch_col) or "").strip() == merch_name]
                     
-                    for idx, row in merch_df.iterrows():
+                    for row in merch_rows:
                         # Müşteriyi Bul
                         customer = None
                         raw_sys_id = str(row.get('Sistem ID') or row.get('Sys ID') or '').replace('nan', '').strip()

@@ -1,4 +1,3 @@
-import pandas as pd
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
@@ -9,6 +8,7 @@ from .models import Customer, CustomerCari, CustomFieldDefinition
 from .forms import CustomerForm, CariForm, CustomFieldForm
 from apps.users.hierarchy_access import get_hierarchy_scope_for_user
 from django.db.models import Q as DQ
+from apps.core.excel_utils import xlsx_from_rows, xlsx_to_rows
 
 # --- LİSTE VE SAYFALAMA ---
 @login_required
@@ -236,10 +236,9 @@ def export_customers(request):
         
         data.append(row)
     
-    df = pd.DataFrame(data)
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    content = xlsx_from_rows(data, sheet_name="Müşteriler")
+    response = HttpResponse(content, content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     response['Content-Disposition'] = 'attachment; filename=musteri_listesi.xlsx'
-    df.to_excel(response, index=False)
     return response
 
 # Bu fonksiyonu views.py içindeki boş olanla değiştir:
@@ -248,8 +247,10 @@ def export_customers(request):
 def import_customers(request):
     if request.method == 'POST' and request.FILES.get('excel_file'):
         try:
-            df = pd.read_excel(request.FILES['excel_file'])
-            df = df.where(pd.notnull(df), None)
+            rows = xlsx_to_rows(request.FILES['excel_file'])
+            if not rows:
+                messages.error(request, "Excel boş veya okunamadı.")
+                return redirect('customer_list')
             
             # 2. Standart Sütun Eşleştirmesi
             col_map = {
@@ -270,9 +271,9 @@ def import_customers(request):
 
             updated_count = 0
             created_count = 0
-            excel_columns = df.columns.tolist()
+            excel_columns = list(rows[0].keys())
 
-            for index, row in df.iterrows():
+            for row in rows:
                 # --- A. ID KONTROLÜ ---
                 raw_id = row.get('Sistem ID')
                 sys_id = None

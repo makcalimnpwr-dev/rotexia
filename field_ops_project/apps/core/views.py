@@ -187,7 +187,7 @@ def settings_home(request):
         'settings_visit': settings_visit,
         'settings_user': settings_user,
     }
-    return render(request, 'apps/core/settings.html', context)
+    return render(request, 'apps/Core/settings.html', context)
 
 # --- AKILLI ANASAYFA ---
 @login_required
@@ -221,7 +221,7 @@ def home(request):
                 'daily_performance': daily_performance,
             }
         }
-        return render(request, 'apps/core/home.html', context)
+        return render(request, 'apps/Core/home.html', context)
 
 
 def healthz(request):

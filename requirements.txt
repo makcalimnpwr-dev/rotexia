@@ -6,3 +6,4 @@ gunicorn==21.2.0        # Canlı ortam sunucusu hazırlığı
 python-dotenv==1.0.0    # Gizli değişkenler için
 dj-database-url==2.1.0  # PostgreSQL connection string parsing
 openpyxl==3.1.5
+whitenoise==6.7.0       # Render'da static dosyaları servis etmek için

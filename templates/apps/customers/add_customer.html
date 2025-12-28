@@ -1,0 +1,129 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        
+        {% if form.errors %}
+            <div class="alert alert-danger">
+                <strong>Hata oluştu:</strong>
+                <ul>
+                {% for field in form %}
+                    {% for error in field.errors %}<li>{{ field.label }}: {{ error }}</li>{% endfor %}
+                {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+        
+        <div class="card shadow border-0">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                <h5 class="m-0 fw-bold text-primary">{% if title %}{{ title }}{% else %}Müşteri Bilgileri{% endif %}</h5>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-sm btn-info text-white" data-bs-toggle="modal" data-bs-target="#addCustomFieldModal">
+                        <i class="fas fa-magic me-1"></i> Müşteri İçin Özel Alan Ekle
+                    </button>
+                    <a href="{% url 'customer_list' %}" class="btn btn-sm btn-light">Listeye Dön</a>
+                </div>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">Müşteri Kodu *</label>
+                            {{ form.customer_code }}
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label fw-bold">Müşteri Adı *</label>
+                            {{ form.name }}
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6"><label class="form-label">Cari / Firma</label>{{ form.cari }}</div>
+                        <div class="col-md-6"><label class="form-label">Yetkili Kişi</label>{{ form.authorized_person }}</div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6"><label class="form-label">İl</label>{{ form.city }}</div>
+                        <div class="col-md-6"><label class="form-label">İlçe</label>{{ form.district }}</div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6"><label class="form-label">Telefon</label>{{ form.phone }}</div>
+                    </div>
+
+                    <div class="mb-3"><label class="form-label">Adres</label>{{ form.address }}</div>
+
+                    <div class="card bg-light border-0 mb-3">
+                        <div class="card-body">
+                            <h6 class="text-info fw-bold mb-3"><i class="fas fa-magic"></i> Özel Bilgiler</h6>
+                            <div class="row">
+                                {% for field in form %}
+                                    {% if "custom_" in field.name %}
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label fw-bold small text-muted">{{ field.label }}</label>
+                                        {{ field }}
+                                    </div>
+                                    {% endif %}
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3 p-3 border rounded mx-1">
+                        <h6 class="text-muted"><i class="fas fa-map-marker-alt"></i> Konum</h6>
+                        <div class="col-md-6"><label class="form-label">Enlem</label>{{ form.latitude }}</div>
+                        <div class="col-md-6"><label class="form-label">Boylam</label>{{ form.longitude }}</div>
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">Kaydet</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Özel Alan Ekleme Modal -->
+<div class="modal fade" id="addCustomFieldModal" tabindex="-1" aria-labelledby="addCustomFieldModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title fw-bold" id="addCustomFieldModalLabel">
+                    <i class="fas fa-magic me-2"></i>Yeni Özel Alan Ekle
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="{% url 'add_custom_field' %}" method="post">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="alert alert-info border-0 mb-3">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Bilgi:</strong> Bu alan tüm mevcut müşterilerde ve yeni eklenen müşterilerde otomatik olarak görünecektir.
+                    </div>
+                    <div class="mb-3">
+                        <label for="fieldName" class="form-label fw-bold">Alan Adı</label>
+                        <input type="text" 
+                               class="form-control" 
+                               id="fieldName" 
+                               name="name" 
+                               placeholder="Örn: Stant Tipi, Raf Sayısı, Mağaza Tipi" 
+                               required
+                               autofocus>
+                        <div class="form-text">Bu alan tüm müşterilerde telefon alanı gibi görünecektir.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                    <button type="submit" class="btn btn-info text-white fw-bold">
+                        <i class="fas fa-plus me-1"></i>Alanı Oluştur
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

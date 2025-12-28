@@ -1,0 +1,315 @@
+{% extends 'base.html' %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h2>Görevler</h2>
+        <span class="text-muted small">Bugün: <strong>{{ today|date:"d.m.Y" }}</strong></span>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{% url 'settings_visit_types' %}" class="btn btn-outline-secondary shadow-sm" title="Ziyaret Tipleri Ayarı"><i class="fas fa-cog"></i></a>
+        <a href="{% url 'generate_daily_tasks' %}" class="btn btn-warning shadow-sm fw-bold"><i class="fas fa-sync-alt"></i> Oto. Oluştur</a>
+        <button type="button" class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#newTaskModal"><i class="fas fa-plus"></i> Yeni Görev</button>
+        
+        <div class="dropdown">
+            <button class="btn btn-secondary shadow-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">Sütunlar</button>
+            <ul class="dropdown-menu p-3 shadow" style="max-height: 300px; overflow-y: auto;">
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="sys_id" checked onchange="toggleColumn('sys_id')"> Sistem ID</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="visit_type" checked onchange="toggleColumn('visit_type')"> Ziyaret Tipi</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="date" checked onchange="toggleColumn('date')"> Tarih</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="cycle_day" checked onchange="toggleColumn('cycle_day')"> Döngü Günü</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="merch" checked onchange="toggleColumn('merch')"> Personel</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="cust_code" checked onchange="toggleColumn('cust_code')"> Müşteri Kodu</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="customer" checked onchange="toggleColumn('customer')"> Müşteri Adı</label></li>
+                
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="city" checked onchange="toggleColumn('city')"> İl</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="district" checked onchange="toggleColumn('district')"> İlçe</label></li>
+                
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="status" checked onchange="toggleColumn('status')"> Durum</label></li>
+            </ul>
+        </div>
+
+        <button onclick="downloadExcel()" class="btn btn-success shadow-sm"><i class="fas fa-file-excel"></i> İndir</button>
+        <button type="button" class="btn btn-outline-success shadow-sm" data-bs-toggle="modal" data-bs-target="#importTaskModal"><i class="fas fa-file-upload"></i> Yükle</button>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-4 bg-light">
+    <div class="card-body">
+        <form method="get">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-3">
+                    <label class="small fw-bold">Genel Arama</label>
+                    <input type="text" name="search" class="form-control form-control-sm" value="{{ f_search }}">
+                </div>
+                
+                <div class="col-md-2">
+                    <label class="small fw-bold">Ziyaret Tipi</label>
+                    <select name="f_visit_type" class="form-select form-select-sm">
+                        <option value="">Tümü</option>
+                        {% for vt in visit_types %}
+                        <option value="{{ vt.id }}" {% if f_visit_type == vt.id|stringformat:"s" %}selected{% endif %}>{{ vt.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-md-2"><label class="small fw-bold">Personel</label><input type="text" name="f_merch" class="form-control form-control-sm" value="{{ f_merch }}"></div>
+                <div class="col-md-2"><label class="small fw-bold">İl</label><input type="text" name="f_city" class="form-control form-control-sm" value="{{ f_city }}"></div>
+
+                <div class="col-md-3">
+                    <label class="small fw-bold">Tarih Aralığı</label>
+                    <div class="input-group input-group-sm">
+                        <input type="date" name="f_start_date" class="form-control" value="{{ f_start_date }}">
+                        <input type="date" name="f_end_date" class="form-control" value="{{ f_end_date }}">
+                    </div>
+                </div>
+
+                <div class="col-md-2">
+                     <label class="small fw-bold text-danger">Tarihsizler</label>
+                     <div class="form-check form-switch">
+                         <input class="form-check-input" type="checkbox" name="f_dateless" value="on" id="datelessCheck" 
+                                {% if f_dateless == 'on' %}checked{% endif %} 
+                                onchange="this.form.submit()">
+                         <label class="form-check-label small" for="datelessCheck">Göster</label>
+                     </div>
+                </div>
+
+                <div class="col-md-10 text-end mt-2">
+                    <a href="{% url 'task_list' %}" class="btn btn-outline-secondary btn-sm">Temizle</a>
+                    <button type="submit" class="btn btn-dark btn-sm px-4">Filtrele</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<form id="bulkForm" action="{% url 'bulk_task_action' %}" method="post">
+    {% csrf_token %}
+    
+    <div id="bulkActionToolbar" class="alert alert-primary shadow-sm d-flex justify-content-between align-items-center" style="display:none;">
+        <div><i class="fas fa-check-circle"></i> <span id="selectedCount" class="fw-bold">0</span> görev seçildi.</div>
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-light btn-sm text-primary fw-bold" data-bs-toggle="modal" data-bs-target="#bulkUpdateModal"><i class="fas fa-edit"></i> Toplu Güncelle</button>
+            <button type="button" class="btn btn-light btn-sm text-primary fw-bold" onclick="openMapWithSelected()"><i class="fas fa-map-marked-alt"></i> Haritada Göster</button>
+            <button type="submit" name="action_type" value="active" class="btn btn-success btn-sm fw-bold"><i class="fas fa-check"></i> Aktif Et</button>
+            <button type="submit" name="action_type" value="passive" class="btn btn-warning btn-sm text-dark fw-bold" onclick="return confirm('Pasife almak istediğine emin misin?');"><i class="fas fa-ban"></i> Pasife Al</button>
+            <button type="submit" name="action_type" value="delete" class="btn btn-danger btn-sm fw-bold" onclick="return confirm('Silmek istediğine emin misin?');"><i class="fas fa-trash"></i> Sil</button>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 40px;"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+                        <th class="col-sys_id">Sistem ID</th>
+                        <th class="col-visit_type">Ziyaret Tipi</th>
+                        <th class="col-date">Tarih</th>
+                        <th class="col-cycle_day">Gün</th> <th class="col-merch">Personel</th>
+                        <th class="col-cust_code">Müşteri Kodu</th>
+                        <th class="col-customer">Müşteri</th>
+                        <th class="col-city">İl</th>
+                        <th class="col-district">İlçe</th>
+                        
+                        <th class="col-status">Durum</th>
+                        <th class="text-end">İşlem</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for task in tasks %}
+                    <tr class="{% if task.status == 'cancelled' %}table-secondary opacity-50{% endif %}">
+                        <td><input type="checkbox" name="selected_ids" value="{{ task.id }}" class="row-checkbox" onchange="updateBulkToolbar()"></td>
+                        <td class="col-sys_id"><span class="badge bg-secondary">G-{{ task.id }}</span></td>
+                        
+                        <td class="col-visit_type">
+                            {% if task.visit_type %}
+                                <span class="badge bg-info text-dark">{{ task.visit_type.name }}</span>
+                            {% else %}
+                                <span class="text-muted small">-</span>
+                            {% endif %}
+                        </td>
+
+                        <td class="col-date">
+                            {% if task.planned_date %}
+                                <div class="fw-bold">{{ task.planned_date|date:"d.m.Y" }}</div>
+                            {% else %}
+                                <span class="badge bg-danger-subtle text-danger border border-danger">Tarihsiz</span>
+                            {% endif %}
+                        </td>
+
+                            <td class="col-cycle_day">
+                            {% if task.planned_date %}
+                                <span class="badge bg-light text-dark border border-dark">{{ task.cycle_day }}. Gün</span>
+                            {% else %}
+                                 -
+                            {% endif %}
+                        </td>
+
+                        <td class="col-merch"><span class="badge bg-light text-dark border">{{ task.merch_code }}</span></td>
+                        <td class="col-cust_code"><span class="font-monospace fw-bold text-primary">{{ task.customer.customer_code }}</span></td>
+                        <td class="col-customer fw-bold">{{ task.customer.name }}</td>
+                        
+                        <td class="col-city">{{ task.customer.city }}</td>
+                        <td class="col-district">{{ task.customer.district }}</td>
+
+                        <td class="col-status">
+                            {% if task.status == 'pending' %}<span class="badge bg-warning text-dark">Bekliyor</span>
+                            {% elif task.status == 'completed' %}<span class="badge bg-success">Tamamlandı</span>
+                            {% elif task.status == 'cancelled' %}<span class="badge bg-secondary">İptal</span>
+                            {% else %}<span class="badge bg-danger">Atlandı</span>{% endif %}
+                        </td>
+                        <td class="text-end">
+                            <a href="{% url 'edit_task' task.pk %}" class="btn btn-sm btn-outline-primary shadow-sm"><i class="fas fa-pen"></i></a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="11" class="text-center py-5">Görev bulunamadı.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="card-footer bg-white py-3">
+            <nav><ul class="pagination pagination-sm justify-content-center mb-0">
+                {% if tasks.has_previous %}<li class="page-item"><a class="page-link" href="?page={{ tasks.previous_page_number }}">Önceki</a></li>{% endif %}
+                <li class="page-item active"><span class="page-link">{{ tasks.number }}</span></li>
+                {% if tasks.has_next %}<li class="page-item"><a class="page-link" href="?page={{ tasks.next_page_number }}">Sonraki</a></li>{% endif %}
+            </ul></nav>
+        </div>
+    </div>
+
+    <div class="modal fade" id="bulkUpdateModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">Toplu Güncelle</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Personel Ata</label>
+                        <select name="new_merch" class="form-select">
+                            <option value="">Değişiklik Yok</option>
+                            {% for m in merchandisers %}
+                            <option value="{{ m }}">{{ m }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Tarih Değiştir</label>
+                        <input type="date" name="new_date" class="form-control">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" name="action_type" value="combined_update" class="btn btn-primary w-100 fw-bold">Uygula</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+<div class="modal fade" id="newTaskModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title">Yeni Görev</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+            <form action="{% url 'create_manual_task' %}" method="post">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Ziyaret Tipi <span class="text-danger">*</span></label>
+                        <select name="visit_type" class="form-select" required>
+                            <option value="">Seçiniz...</option>
+                            {% for vt in visit_types %}
+                            <option value="{{ vt.id }}">{{ vt.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3"><label>Müşteri Kodu</label><input type="text" name="customer_code" class="form-control" required></div>
+                    <div class="mb-3"><label>Personel</label><input type="text" name="merch_code" class="form-control" required></div>
+                    <div class="mb-3"><label>Tarih</label><input type="date" name="planned_date" class="form-control" required></div>
+                </div>
+                <div class="modal-footer"><button type="submit" class="btn btn-primary">Oluştur</button></div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div id="loadingOverlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; flex-direction:column; justify-content:center; align-items:center; color:white; backdrop-filter: blur(5px);">
+    <div class="spinner-border text-primary" style="width: 4rem; height: 4rem;" role="status"></div>
+    <h4 class="mt-4 fw-bold">Görevler Oluşturuluyor...</h4>
+</div>
+
+<div class="modal fade" id="importTaskModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title">Görev Yükle</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="{% url 'import_tasks' %}" method="post" enctype="multipart/form-data" onsubmit="document.getElementById('loadingOverlay').style.display='flex'">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="alert alert-light border mb-3">
+                        <a href="{% url 'download_template' 'task' %}" class="btn btn-outline-primary btn-sm w-100">
+                            <i class="fas fa-download"></i> Örnek Görev Şablonu
+                        </a>
+                    </div>
+                    <input type="file" name="excel_file" class="form-control" required>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-success w-100">Yükle</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="mapViewModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered" style="max-width: 90vw;">
+        <div class="modal-content" style="height: 85vh;">
+            <div class="modal-header py-2 bg-light">
+                <h5 class="modal-title">Harita Görünümü</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <iframe id="mapFrame" src="" style="width: 100%; height: 100%; border: none;"></iframe>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function toggleColumn(col) {
+        var disp = document.querySelector('input[value="'+col+'"]').checked ? '' : 'none';
+        document.querySelectorAll('.col-'+col).forEach(el => el.style.display = disp);
+    }
+    
+    function toggleSelectAll() {
+        var main = document.getElementById('selectAll');
+        document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = main.checked);
+        updateBulkToolbar();
+    }
+
+    function updateBulkToolbar() {
+        var count = document.querySelectorAll('.row-checkbox:checked').length;
+        document.getElementById('selectedCount').innerText = count;
+        document.getElementById('bulkActionToolbar').style.display = count > 0 ? 'flex' : 'none';
+    }
+
+    function downloadExcel() {
+        const urlParams = new URLSearchParams(window.location.search);
+        var cols = [];
+        document.querySelectorAll('.col-toggle:checked').forEach(c => cols.push(c.value));
+        urlParams.set('fields', cols.join(','));
+        window.location.href = "{% url 'export_tasks' %}?" + urlParams.toString();
+    }
+    
+    function openMapWithSelected() {
+        var selected = [];
+        document.querySelectorAll('.row-checkbox:checked').forEach(cb => selected.push(cb.value));
+        if (selected.length === 0) { alert("Lütfen görev seçiniz."); return; }
+        var url = "{% url 'task_map_view' %}?ids=" + selected.join(',');
+        document.getElementById('mapFrame').src = url;
+        new bootstrap.Modal(document.getElementById('mapViewModal')).show();
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rotexia Dashboard</title>
+    {% load static %}
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background-color: #f4f6f9; font-family: 'Segoe UI', sans-serif; overflow-x: hidden; }
+        .sidebar { height: 100vh; width: 260px; position: fixed; top: 0; left: 0; background-color: #1e1e2d; padding-top: 20px; z-index: 1000; }
+        .sidebar-brand { color: #fff; font-size: 22px; font-weight: bold; text-align: center; margin-bottom: 30px; letter-spacing: 1px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 15px; }
+        .sidebar-brand img { height: 40px; width: auto; }
+        .sidebar-brand span { color: #dc3545; }
+        .sidebar a { padding: 15px 25px; text-decoration: none; font-size: 15px; color: #a4a6b3; display: block; transition: 0.3s; border-left: 3px solid transparent; }
+        .sidebar a:hover { color: #fff; background-color: #2c2c3e; }
+        .sidebar a.active { color: #fff; background-color: #2c2c3e; border-left: 3px solid #dc3545; }
+        .sidebar i { width: 25px; text-align: center; margin-right: 10px; }
+        .content { margin-left: 260px; padding: 20px; }
+        .top-navbar { background-color: #fff; padding: 15px 30px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; border-radius: 10px; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-brand">
+            <img src="{% static 'images/rotexia-logo-dark.svg' %}" alt="Rotexia">
+        </div>
+        <a href="{% url 'home' %}"><i class="fas fa-home"></i> Anasayfa</a>
+        {% if is_root_admin %}
+          <a href="{% url 'hierarchy' %}"><i class="fas fa-sitemap"></i> Hiyerarşi</a>
+          <a href="{% url 'user_list' %}"><i class="fas fa-users"></i> Kullanıcılar</a>
+        {% endif %}
+        <a href="{% url 'customer_list' %}"><i class="fas fa-store"></i> Müşteriler</a>
+        <a href="{% url 'task_list' %}">
+            <i class="fas fa-tasks"></i> Görevler
+        </a>
+
+        <a href="{% url 'route_plan_list' %}">
+            <i class="fas fa-route"></i> Rota Planı
+            </a>
+
+        <a href="{% url 'survey_list' %}">
+            <i class="fas fa-clipboard-check"></i> Formlar
+        </a>
+            
+        <a href="#reportsMenu" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="reportsMenu">
+            <i class="fas fa-chart-line"></i> Raporlar
+            <span class="float-end" style="opacity:.7;"><i class="fas fa-chevron-down"></i></span>
+        </a>
+        <div class="collapse" id="reportsMenu">
+            <a href="{% url 'visit_detail_report' %}" style="padding-left: 52px; font-size: 14px;">
+                <i class="fas fa-file-alt"></i> Detaylı Ziyaret Raporu
+            </a>
+            <a href="{% url 'daily_visit_summary_report' %}" style="padding-left: 52px; font-size: 14px;">
+                <i class="fas fa-chart-pie"></i> Günlük Ziyaret Özeti
+            </a>
+            <a href="{% url 'survey_reports_home' %}" style="padding-left: 52px; font-size: 14px;">
+                <i class="fas fa-clipboard-list"></i> Anket Raporları
+            </a>
+        </div>
+        
+        <a href="{% url 'reports_trash' %}">
+            <i class="fas fa-trash"></i> Çöp Kutusu
+        </a>
+        <hr style="border-color: #3f3f50; margin: 20px;">
+        {% if is_root_admin %}
+          <a href="{% url 'settings_home' %}"><i class="fas fa-cog"></i> Ayarlar</a>
+        {% endif %}
+        <form action="{% url 'logout' %}" method="post" id="logout-form">
+            {% csrf_token %}
+            <a href="#" onclick="document.getElementById('logout-form').submit();" style="color: #dc3545;">
+                <i class="fas fa-sign-out-alt"></i> Çıkış Yap
+            </a>
+        </form>
+    </div>
+
+    <div class="content">
+        <div class="top-navbar">
+            <h5 class="m-0 text-secondary">Hoşgeldin, <strong>{{ user.username }}</strong></h5>
+            <div class="user-profile">
+                <img src="https://ui-avatars.com/api/?name={{ user.username }}&background=dc3545&color=fff" class="rounded-circle" width="40">
+            </div>
+        </div>
+        {% block content %}
+        {% endblock %}
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

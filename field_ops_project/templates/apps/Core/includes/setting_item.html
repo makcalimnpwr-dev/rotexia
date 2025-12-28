@@ -1,0 +1,19 @@
+<div class="mb-4 pb-3 border-bottom">
+    <label class="form-label fw-bold d-block text-dark">{{ setting.label }}</label>
+    
+    {% if setting.input_type == 'bool' %}
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" name="{{ setting.key }}" style="width: 3em; height: 1.5em;" 
+                   {% if setting.value == 'True' %}checked{% endif %}>
+            <label class="form-check-label ms-2 text-muted">{{ setting.description }}</label>
+        </div>
+
+    {% elif setting.input_type == 'number' %}
+        <input type="number" name="{{ setting.key }}" class="form-control" value="{{ setting.value }}" style="max-width: 200px;">
+        <div class="form-text">{{ setting.description }}</div>
+
+    {% else %}
+        <input type="text" name="{{ setting.key }}" class="form-control" value="{{ setting.value }}">
+        <div class="form-text">{{ setting.description }}</div>
+    {% endif %}
+</div>

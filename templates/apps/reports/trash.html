@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="m-0">Çöp Kutusu</h2>
+    <div class="text-muted small">Silinen raporlar burada tutulur. Süre dolunca otomatik silinir.</div>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="{% url 'reports_home' %}">
+      <i class="fas fa-arrow-left"></i> Raporlar
+    </a>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <form method="post" action="{% url 'reports_trash_settings' %}" class="row g-3 align-items-end">
+      {% csrf_token %}
+      <div class="col-md-4">
+        <label class="form-label fw-bold small">Silinecek Gün Sayısı</label>
+        <input type="number" min="0" max="3650" class="form-control" name="retention_days" value="{{ retention_days }}">
+        <div class="form-text">0 yazarsanız çöp kutusu bekletmez (silinenler bir sonraki kontrolte temizlenir).</div>
+      </div>
+      <div class="col-md-3 d-grid">
+        <button type="submit" class="btn btn-primary">
+          <i class="fas fa-save"></i> Kaydet
+        </button>
+      </div>
+      {% if purged_count %}
+        <div class="col-md-5">
+          <div class="alert alert-info py-2 mb-0">
+            Otomatik temizlik yapıldı: <strong>{{ purged_count }}</strong> rapor kalıcı silindi.
+          </div>
+        </div>
+      {% endif %}
+    </form>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th class="ps-4">Rapor</th>
+          <th>Tip</th>
+          <th>Silinme Tarihi</th>
+          <th>Kalan Gün</th>
+          <th class="text-end pe-4">İşlem</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          {% with r=row.report %}
+          <tr>
+            <td class="ps-4">
+              <div class="fw-bold">{{ r.title }}</div>
+            </td>
+            <td><span class="badge bg-secondary">{{ r.get_report_type_display }}</span></td>
+            <td>{{ row.deleted_at|date:"d.m.Y H:i" }}</td>
+            <td>
+              {% if retention_days > 0 %}
+                <span class="badge bg-light text-dark border">{{ row.days_left }}</span>
+              {% else %}
+                <span class="badge bg-light text-dark border">0</span>
+              {% endif %}
+            </td>
+            <td class="text-end pe-4">
+              <form method="post" action="{% url 'reports_trash_restore' r.id %}" class="d-inline">
+                {% csrf_token %}
+                <button class="btn btn-sm btn-outline-success" type="submit">
+                  <i class="fas fa-undo"></i> Geri Yükle
+                </button>
+              </form>
+              <form method="post" action="{% url 'reports_trash_delete_now' r.id %}" class="d-inline">
+                {% csrf_token %}
+                <button class="btn btn-sm btn-danger" type="submit" onclick="return confirm('Şimdi silinsin mi? Bu işlem geri alınamaz.');">
+                  <i class="fas fa-trash"></i> Şimdi Sil
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endwith %}
+        {% empty %}
+          <tr><td colspan="5" class="text-center text-muted py-5">Çöp kutusu boş.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+
+

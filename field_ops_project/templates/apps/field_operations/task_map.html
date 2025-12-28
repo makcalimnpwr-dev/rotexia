@@ -1,0 +1,123 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+<script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+
+<div id="map" style="height: 100vh; width: 100%;"></div>
+
+<form id="mapBulkForm" action="{% url 'bulk_task_action' %}" method="post" target="_parent">
+    {% csrf_token %}
+    <div id="hiddenInputs"></div>
+
+    <div class="modal fade" id="mapActionModal" tabindex="-1" data-bs-backdrop="static">
+        <div class="modal-dialog modal-sm"> <div class="modal-content">
+                <div class="modal-header bg-primary text-white py-2">
+                    <h6 class="modal-title">Bölge İşlemleri</h6>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-light border text-center p-2 mb-3">
+                        <strong id="selectedCountDisplay" class="text-danger fs-4">0</strong> görev seçildi.
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Personel</label>
+                        <select name="new_merch" class="form-select form-select-sm">
+                            <option value="">Değişiklik Yok</option>
+                            {% for m in merchandisers %}
+                            <option value="{{ m }}">{{ m }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Tarih</label>
+                        <input type="date" name="new_date" class="form-control form-control-sm">
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button type="submit" name="action_type" value="combined_update" class="btn btn-primary fw-bold btn-sm">
+                            Değişiklikleri Uygula
+                        </button>
+                        
+                        <hr class="my-1">
+                        
+                        <div class="d-flex gap-1">
+                            <button type="submit" name="action_type" value="active" class="btn btn-success btn-sm flex-fill">Aktif Et</button>
+                            <button type="submit" name="action_type" value="passive" class="btn btn-warning btn-sm flex-fill">Pasif</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+<script>
+    // Script kısmı genel olarak aynı, sadece harita yüksekliğini CSS'de 100vh yaptık.
+    // ... (Harita JS kodları aynı kalabilir) ...
+    var tasks = JSON.parse('{{ tasks_json|escapejs }}');
+    var map = L.map('map').setView([41.0082, 28.9784], 10);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+    
+    // ... (Marker ve Draw kodları önceki cevaptakiyle aynı) ...
+    var markers = [];
+    var drawnItems = new L.FeatureGroup();
+    map.addLayer(drawnItems);
+    var drawControl = new L.Control.Draw({ edit: { featureGroup: drawnItems }, draw: { polygon: true, rectangle: true, circle: true, marker: false, polyline: false, circlemarker: false } });
+    map.addControl(drawControl);
+
+    // Markerları ekleme döngüsü (Öncekiyle aynı)
+    tasks.forEach(function(t) {
+        var marker = L.marker([t.lat, t.lng]);
+        marker.taskData = t; 
+        marker.addTo(map);
+        markers.push(marker);
+    });
+    
+    // Çizim bitince (Modal açma kısmı)
+    map.on(L.Draw.Event.CREATED, function (e) {
+        var layer = e.layer;
+        drawnItems.clearLayers();
+        drawnItems.addLayer(layer);
+        
+        var selectedIds = [];
+        // ... (Seçim mantığı aynı - Turf.js veya Circle radius) ...
+        // Basitlik için tüm markerları dönüp kontrol etme mantığı buraya gelecek
+        // (Önceki cevabımda tam algoritma vardı, onu koru)
+        
+        if (e.layerType === 'circle') {
+            var center = layer.getLatLng();
+            var radius = layer.getRadius();
+            markers.forEach(function(m) { if (center.distanceTo(m.getLatLng()) <= radius) selectedIds.push(m.taskData.id); });
+        } else {
+            var shape = layer.toGeoJSON();
+            markers.forEach(function(m) {
+                var pt = turf.point([m.getLatLng().lng, m.getLatLng().lat]);
+                if (turf.booleanPointInPolygon(pt, shape)) selectedIds.push(m.taskData.id);
+            });
+        }
+
+        if (selectedIds.length > 0) {
+            var container = document.getElementById('hiddenInputs');
+            container.innerHTML = '';
+            selectedIds.forEach(function(id) {
+                var input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'selected_ids';
+                input.value = id;
+                container.appendChild(input);
+            });
+            document.getElementById('selectedCountDisplay').innerText = selectedIds.length;
+            new bootstrap.Modal(document.getElementById('mapActionModal')).show();
+        } else {
+            alert("Bölgede görev yok.");
+            drawnItems.clearLayers();
+        }
+    });
+</script>
+{% endblock %}

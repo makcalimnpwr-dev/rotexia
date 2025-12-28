@@ -1,0 +1,21 @@
+{
+  "name": "FieldOps",
+  "short_name": "FieldOps",
+  "description": "Saha Operasyon Yönetimi",
+  "lang": "tr",
+  "start_url": "/app/?source=pwa&ngrok-skip-browser-warning=true",
+  "scope": "/app/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0d6efd",
+  "icons": [
+    {
+      "src": "/static/pwa/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+
+

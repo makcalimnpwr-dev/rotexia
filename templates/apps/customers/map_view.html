@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>Müşteri Haritası</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; }
+        #map { height: 100vh; width: 100%; z-index: 1; }
+        .info-box {
+            position: absolute; top: 10px; right: 10px; z-index: 9999;
+            background: white; padding: 10px; border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2); max-width: 300px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="info-box">
+        <h6 class="mb-1 fw-bold">Seçilen Müşteriler</h6>
+        <div id="statusMsg" class="small text-muted">Harita yükleniyor...</div>
+        <button onclick="window.close()" class="btn btn-sm btn-danger w-100 mt-2">Pencereyi Kapat</button>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <script>
+        try {
+            // Backend'den gelen veriyi güvenli şekilde al
+            var locations = JSON.parse('{{ locations_json|escapejs }}');
+            var statusDiv = document.getElementById('statusMsg');
+
+            if (!L) {
+                statusDiv.innerHTML = "<span class='text-danger'>Harita kütüphanesi yüklenemedi! İnternet bağlantınızı kontrol edin.</span>";
+            } else {
+                // Haritayı Başlat (Türkiye Merkezli)
+                var map = L.map('map').setView([39.0, 35.0], 6);
+
+                // Harita Katmanını Ekle
+                L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '&copy; OpenStreetMap'
+                }).addTo(map);
+
+                // Markerları Ekle
+                var markers = [];
+                var bounds = L.latLngBounds(); // Sınırları hesaplamak için
+
+                if (locations.length > 0) {
+                    locations.forEach(function(loc) {
+                        // Koordinatları sayıya çevir (Garanti olsun)
+                        var lat = parseFloat(loc.lat);
+                        var lng = parseFloat(loc.lng);
+
+                        if (!isNaN(lat) && !isNaN(lng)) {
+                            var marker = L.marker([lat, lng]).addTo(map);
+                            var popupContent = `
+                                <div class="text-center">
+                                    <h6 class="fw-bold text-primary mb-1">${loc.name}</h6>
+                                    <p class="mb-1 small">${loc.city}</p>
+                                    <span class="badge bg-secondary">${loc.cari}</span>
+                                    <hr class="my-1">
+                                    <a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}" target="_blank" class="btn btn-sm btn-success w-100 text-white" style="text-decoration:none;">Yol Tarifi</a>
+                                </div>
+                            `;
+                            marker.bindPopup(popupContent);
+                            markers.push(marker);
+                            bounds.extend([lat, lng]);
+                        }
+                    });
+
+                    // Eğer marker varsa haritayı oraya odakla
+                    if (markers.length > 0) {
+                        map.fitBounds(bounds, {padding: [50, 50]});
+                        statusDiv.innerHTML = `<span class='text-success'>${markers.length} müşteri gösteriliyor.</span>`;
+                    } else {
+                        statusDiv.innerHTML = "<span class='text-warning'>Seçilen müşterilerin koordinatı hatalı veya yok.</span>";
+                    }
+                } else {
+                    statusDiv.innerHTML = "<span class='text-warning'>Hiçbir koordinat verisi gelmedi.</span>";
+                }
+            }
+        } catch (error) {
+            console.error(error);
+            document.body.innerHTML = `<div class="p-5 text-center"><h3>Bir hata oluştu :(</h3><p>${error.message}</p></div>`;
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,80 @@
+/* GENEL MOBİL AYARLARI */
+body {
+    background-color: #f8f9fa; /* Hafif gri arka plan */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding-bottom: 80px; /* Alt menü için boşluk */
+}
+
+/* KART TASARIMI (App Hissi Veren Gölgeler) */
+.app-card {
+    background: white;
+    border-radius: 16px;
+    border: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    transition: transform 0.2s;
+    margin-bottom: 15px;
+}
+.app-card:active {
+    transform: scale(0.98); /* Tıklama hissi */
+}
+
+/* ALT MENÜ (Bottom Navigation) */
+.bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background: white;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+    display: flex;
+    justify-content: space-around;
+    padding: 10px 0;
+    z-index: 1000;
+    padding-bottom: env(safe-area-inset-bottom); /* iPhone X+ uyumu */
+}
+
+.nav-item-link {
+    color: #adb5bd;
+    text-align: center;
+    text-decoration: none;
+    font-size: 11px;
+    font-weight: 600;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.nav-item-link.active {
+    color: #0d6efd; /* Ana Renk */
+}
+
+.nav-item-link i {
+    font-size: 20px;
+    margin-bottom: 4px;
+}
+
+/* ÜST BAŞLIK (Header) */
+.app-header {
+    background: white;
+    padding: 15px 20px;
+    padding-top: max(15px, env(safe-area-inset-top));
+    position: sticky;
+    top: 0;
+    z-index: 999;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.03);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.task-status-badge {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    font-size: 10px;
+    padding: 4px 8px;
+    border-radius: 20px;
+    font-weight: bold;
+    text-transform: uppercase;
+}

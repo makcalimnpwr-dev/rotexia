@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="m-0">Anket Raporları</h2>
+    <div class="text-muted small">Anket seçip raporunu görüntüleyebilir ve Excel indirebilirsiniz.</div>
+  </div>
+  <div>
+    <a class="btn btn-outline-secondary" href="{% url 'reports_home' %}">
+      <i class="fas fa-arrow-left"></i> Raporlar
+    </a>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-body p-0">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th class="ps-4">Anket</th>
+          <th>Oluşturulma</th>
+          <th class="text-end pe-4">İşlem</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          {% with r=row.report s=row.survey %}
+          <tr>
+            <td class="ps-4">
+              <div class="fw-bold">{{ r.title }}</div>
+              <div class="text-muted small">
+                {% if s %}{{ s.description|default:"-" }}{% else %}Kaynak anket bulunamadı.{% endif %}
+              </div>
+            </td>
+            <td>{{ r.created_at|date:"d.m.Y H:i" }}</td>
+            <td class="text-end pe-4">
+              {% if s %}
+                <a class="btn btn-sm btn-primary" href="{% url 'survey_report' s.id %}">
+                  <i class="fas fa-chart-bar"></i> Aç
+                </a>
+              {% endif %}
+              <form method="post" action="{% url 'report_move_to_trash' r.id %}" class="d-inline">
+                {% csrf_token %}
+                <button class="btn btn-sm btn-outline-danger" type="submit" onclick="return confirm('Rapor çöp kutusuna taşınsın mı?');">
+                  <i class="fas fa-trash"></i> Sil
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endwith %}
+        {% empty %}
+          <tr><td colspan="3" class="text-center text-muted py-5">Henüz rapor oluşturulmamış. Formlar ekranından “Rapor Oluştur” ile ekleyebilirsiniz.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+

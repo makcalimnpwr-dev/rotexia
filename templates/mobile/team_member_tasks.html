@@ -1,0 +1,42 @@
+{% extends 'base_mobile.html' %}
+
+{% block content %}
+<div class="container py-3">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h5 class="m-0 fw-bold">{{ merch_code }}</h5>
+      <div class="text-muted small">{{ completed }}/{{ total }} • {{ today|date:"d.m.Y" }}</div>
+    </div>
+    <a class="btn btn-outline-secondary btn-sm" href="{% url 'mobile_home' %}">
+      <i class="fas fa-arrow-left"></i>
+    </a>
+  </div>
+
+  {% for task in tasks %}
+  <div class="card border-0 shadow-sm mb-2" style="border-radius: 16px; cursor:pointer;" onclick="location.href='{% url 'mobile_task_detail' task.id %}'">
+    <div class="card-body d-flex justify-content-between align-items-center">
+      <div>
+        <div class="fw-bold">{{ task.customer.name }}</div>
+        <div class="text-muted small">
+          <i class="fas fa-map-pin text-danger me-1"></i>{{ task.customer.district }} / {{ task.customer.city }}
+        </div>
+      </div>
+      <div class="text-end">
+        {% if task.status == 'completed' %}
+          <span class="badge bg-success">Tamamlandı</span>
+        {% else %}
+          <span class="badge bg-secondary">Bekliyor</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% empty %}
+  <div class="text-center p-5 text-muted">
+    <i class="fas fa-check-circle fa-3x mb-3 opacity-25"></i>
+    <p>Bugün için görev yok.</p>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}
+
+

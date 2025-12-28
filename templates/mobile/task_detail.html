@@ -1,0 +1,830 @@
+{% extends 'base_mobile.html' %}
+
+{% block content %}
+<style> 
+    /* Bu sayfada container padding olmasın, başlık tam otursun */
+    .container { padding: 0 !important; max-width: 100%; } 
+    /* Alt menüyü bu sayfada gizleyelim ki Start butonu tam otursun */
+    .bottom-nav { display: none; }
+</style>
+
+<div class="store-header">
+    <div class="d-flex justify-content-between align-items-start mb-2">
+        <a href="{% url 'mobile_home' %}" class="text-dark" style="font-size: 18px; text-decoration: none;" onclick="return confirmGoBack(event)">
+            <i class="fas fa-arrow-left"></i>
+        </a>
+    </div>
+    <h3 class="fw-bold text-dark m-0">{{ task.customer.name }}</h3>
+    <p class="text-muted small mt-1">
+        <i class="fas fa-map-marker-alt text-danger me-1"></i>
+        {% if task.customer.address and task.customer.address != 'nan' %}
+            {{ task.customer.address }}
+        {% else %}
+            {{ task.customer.district|default:"" }} / {{ task.customer.city|default:"" }}
+        {% endif %}
+    </p>
+    
+    <a href="https://maps.google.com/?q={{ task.customer.latitude }},{{ task.customer.longitude }}" target="_blank" class="btn btn-sm btn-outline-secondary rounded-pill px-3">
+        <i class="fas fa-location-arrow me-1"></i> Yol Tarifi
+    </a>
+</div>
+
+<div class="survey-list-container">
+    <h6 class="text-muted fw-bold ps-2 mb-3 small text-uppercase">ZİYARET GÖREVLERİ</h6>
+
+    {% for survey in surveys %}
+<div class="survey-item {% if can_act %}disabled-survey{% else %}{% if survey.has_answers %}active-survey{% else %}disabled-survey{% endif %}{% endif %}"
+     data-url="{% if can_act %}{% url 'mobile_fill_survey' task.id survey.id %}{% else %}{% url 'mobile_view_survey' task.id survey.id %}{% endif %}">
+    <div class="survey-icon">
+        <i class="fas fa-clipboard-list"></i>
+    </div>
+    <div class="flex-grow-1">
+        <h6 class="m-0 fw-bold text-dark">{{ survey.title }}</h6>
+        <small class="text-muted" style="font-size: 11px;">
+            {% if survey.is_done %}
+                <span class="text-success fw-bold"><i class="fas fa-check-circle"></i> Yapıldı</span>
+            {% else %}
+                <span class="text-secondary"><i class="far fa-circle"></i> Yapılmadı</span>
+            {% endif %}
+            {% if survey.required_total %}
+                <span class="ms-2">({{ survey.required_done }}/{{ survey.required_total }})</span>
+            {% endif %}
+        </small>
+    </div>
+    <div class="status-icon-area me-2">
+        {% if survey.is_done %}
+            <i class="fas fa-check text-success"></i>
+        {% else %}
+            <i class="fas fa-minus text-muted"></i>
+        {% endif %}
+    </div>
+    <div class="lock-icon-area">
+        {% if can_act %}
+          <i class="fas fa-lock text-secondary opacity-25"></i>
+        {% else %}
+          {% if survey.has_answers %}
+            <i class="fas fa-eye text-primary"></i>
+          {% else %}
+            <i class="fas fa-lock text-secondary opacity-25"></i>
+          {% endif %}
+        {% endif %}
+    </div>
+</div>
+    {% empty %}
+    <div class="text-center py-4 text-muted small">
+        Bu ziyaret için özel bir form tanımlanmamış.
+    </div>
+    {% endfor %}
+</div>
+
+{% if can_act %}
+<div class="fixed-bottom-action">
+    <form method="post" action="#"> {% csrf_token %}
+        {% if can_act %}
+          <button type="button" class="btn-start-visit" onclick="startVisit()">
+              <i class="fas fa-play me-2"></i> Ziyareti Başlat
+          </button>
+        {% endif %}
+    </form>
+</div>
+{% endif %}
+
+<script>
+    // Üst kullanıcılar için: doldurulan formlara tıklayınca görüntüleme ekranına git
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.survey-item.active-survey').forEach(item => {
+            item.style.opacity = '1';
+            item.style.cursor = 'pointer';
+            item.onclick = function() {
+                let url = this.getAttribute('data-url');
+                if (url) window.location.href = url;
+            };
+            const lock = item.querySelector('.lock-icon-area');
+            if (lock) lock.innerHTML = '<i class="fas fa-eye text-primary"></i>';
+        });
+    });
+    // Deneme sayacı - sürekli döngüyü önlemek için
+    let locationAttemptCount = 0;
+    const maxLocationAttempts = 2; // Maksimum 2 deneme
+
+    // Sayfa açılışında mola aktifse butonu pasif göster
+    document.addEventListener('DOMContentLoaded', function() {
+        try {
+            const breakActive = localStorage.getItem('breakActive') === 'true';
+            if (breakActive) {
+                const btn = document.querySelector('.btn-start-visit');
+                if (btn) {
+                    btn.disabled = true;
+                    btn.style.opacity = '0.6';
+                    btn.innerHTML = '<i class="fas fa-mug-hot me-2"></i> Molada (Ziyaret Başlatılamaz)';
+                }
+            }
+        } catch (e) {}
+    });
+    
+    // 1. Ziyareti Başlatma İsteği
+    function startVisit() {
+        // Mola kontrolü: Moladayken ziyaret başlatılamaz
+        try {
+            const breakActive = localStorage.getItem('breakActive') === 'true';
+            if (breakActive) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Moladasınız',
+                    text: 'Mola bitene kadar ziyaret başlatamazsınız. Önce “Mola Bitir” yapın.',
+                    confirmButtonText: 'Tamam'
+                });
+                return;
+            }
+        } catch (e) {
+            // localStorage yoksa sessiz geç
+        }
+
+        // Önce mesafe kuralı açık mı kontrol et
+        fetch('/api/get-distance-rule/')
+            .then(response => response.json())
+            .then(ruleData => {
+                const distanceRuleEnabled = ruleData.distance_rule === true || ruleData.distance_rule === 'True';
+
+                // Mesafe kuralı kapalıysa: konum gerekmeden direkt başlat
+                if (!distanceRuleEnabled) {
+                    Swal.fire({
+                        title: 'Ziyaret Başlatılıyor',
+                        html: 'Mesafe kuralı kapalı olduğu için konum doğrulaması yapılmadan başlatılacak.',
+                        timer: 800,
+                        showConfirmButton: false,
+                        didOpen: () => { Swal.showLoading(); }
+                    });
+                    sendLocationToServerWithFallback();
+                    return;
+                }
+
+                // Mesafe kuralı açık: eski akış (konum zorunlu)
+                if (locationAttemptCount >= maxLocationAttempts) {
+                    Swal.fire({
+                        icon: 'warning',
+                        title: 'Konum Alınamadı',
+                        html: 'Konum alınamadı ancak ziyareti başlatmaya devam edebilirsiniz. Ziyaret sırasında konum gerekli olacaktır.<br><br><small>GPS\'in açık olduğundan ve açık alanda olduğunuzdan emin olun.</small>',
+                        confirmButtonText: 'Devam Et',
+                        showCancelButton: true,
+                        cancelButtonText: 'İptal'
+                    }).then((result) => {
+                        if (result.isConfirmed) {
+                            sendLocationToServerWithFallback();
+                        }
+                    });
+                    return;
+                }
+
+                locationAttemptCount++;
+                console.log('startVisit fonksiyonu çağrıldı, deneme:', locationAttemptCount);
+                
+                Swal.fire({
+                    title: 'Konum Alınıyor...',
+                    html: 'Lütfen bekleyin, GPS verisi doğrulanıyor.',
+                    allowOutsideClick: false,
+                    didOpen: () => { Swal.showLoading(); }
+                });
+
+                if (navigator.geolocation) {
+                    console.log('Geolocation API mevcut, konum isteniyor...');
+                    // Önce cache'lenmiş konumu hızlıca al (eğer varsa)
+                    navigator.geolocation.getCurrentPosition(
+                        function(position) {
+                            // Başarılı - sayacı sıfırla
+                            locationAttemptCount = 0;
+                            sendLocationToServer(position);
+                        }, 
+                        function(error) {
+                            // İlk denemede hata - cache yoksa veya timeout olduysa, daha uzun süre bekle
+                            if (error.code === error.TIMEOUT && locationAttemptCount < maxLocationAttempts) {
+                                console.log('İlk deneme timeout, daha uzun süre bekleniyor...');
+                                // İkinci deneme - daha uzun timeout ile
+                                navigator.geolocation.getCurrentPosition(
+                                    function(position) {
+                                        locationAttemptCount = 0;
+                                        sendLocationToServer(position);
+                                    },
+                                    function(error2) {
+                                        // İkinci deneme de başarısız
+                                        showError(error2);
+                                    },
+                                    {
+                                        enableHighAccuracy: false, // Hızlı sonuç için false
+                                        timeout: 8000, // 8 saniye
+                                        maximumAge: 600000 // 10 dakika önceki cache'i kabul et
+                                    }
+                                );
+                            } else {
+                                showError(error);
+                            }
+                        },
+                        {
+                            enableHighAccuracy: false, // Hızlı sonuç için false (GPS yerine WiFi/hücresel kullanır)
+                            timeout: 5000, // 5 saniye - hızlı timeout
+                            maximumAge: 600000 // 10 dakika önceki cache'lenmiş konumu kabul et (daha uzun süre)
+                        }
+                    );
+                } else {
+                    console.error('Geolocation API desteklenmiyor');
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Hata',
+                        text: 'Tarayıcınız konum servisini desteklemiyor.',
+                        confirmButtonText: 'Tamam'
+                    });
+                }
+            })
+            .catch(() => {
+                // Kural okunamazsa varsayılan: mesafe kuralı açık kabul et ve mevcut akış
+                locationAttemptCount++;
+                Swal.fire({
+                    title: 'Konum Alınıyor...',
+                    html: 'Lütfen bekleyin, GPS verisi doğrulanıyor.',
+                    allowOutsideClick: false,
+                    didOpen: () => { Swal.showLoading(); }
+                });
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(sendLocationToServer, showError, {
+                        enableHighAccuracy: false,
+                        timeout: 5000,
+                        maximumAge: 600000
+                    });
+                } else {
+                    Swal.fire({ icon: 'error', title: 'Hata', text: 'Tarayıcınız konum servisini desteklemiyor.' });
+                }
+            });
+    }
+    
+    // Konum olmadan ziyareti başlat (fallback)
+    function sendLocationToServerWithFallback() {
+        const taskId = parseInt("{{ task.id }}", 10);
+        const url = `/api/start-visit/${taskId}/`;
+        
+        // Konum olmadan gönder (sunucu kontrol edecek)
+        fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrftoken
+            },
+            body: JSON.stringify({ latitude: null, longitude: null }),
+            credentials: 'same-origin'
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.text().then(text => {
+                    throw new Error(`HTTP ${response.status}: ${text}`);
+                });
+            }
+            return response.text().then(text => {
+                try {
+                    return JSON.parse(text);
+                } catch (e) {
+                    throw new Error('Sunucudan geçersiz yanıt alındı.');
+                }
+            });
+        })
+        .then(data => {
+            if (data && data.success) {
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Ziyaret Başlatıldı!',
+                    text: data.message || 'Ziyaret başarıyla başlatıldı.',
+                    timer: 1500,
+                    showConfirmButton: false
+                });
+                updateUIForStartedVisit();
+            } else {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Hata',
+                    text: data.message || 'Ziyaret başlatılamadı.',
+                    confirmButtonText: 'Tamam'
+                });
+            }
+        })
+        .catch(error => {
+            console.error('Fetch hatası:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'Bağlantı Hatası',
+                text: 'Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edin.',
+                confirmButtonText: 'Tamam'
+            });
+        });
+    }
+
+    // CSRF Token'ı al
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+    
+    const csrftoken = getCookie('csrftoken') || '{{ csrf_token }}';
+    
+    // 2. Sunucuya Gönderme
+    function sendLocationToServer(position) {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const taskId = parseInt("{{ task.id }}", 10);
+        
+        console.log('Konum alındı:', lat, lng);
+        console.log('Task ID:', taskId);
+        console.log('CSRF Token:', csrftoken ? 'Var' : 'Yok');
+
+        const url = `/api/start-visit/${taskId}/`;
+        console.log('Fetch URL:', url);
+        console.log('Request body:', JSON.stringify({ latitude: lat, longitude: lng }));
+        
+        fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrftoken
+            },
+            body: JSON.stringify({ latitude: lat, longitude: lng }),
+            credentials: 'same-origin'
+        })
+        .then(response => {
+            console.log('Response status:', response.status);
+            console.log('Response headers:', response.headers);
+            
+            // Response'un başarılı olup olmadığını kontrol et
+            if (!response.ok) {
+                return response.text().then(text => {
+                    console.error('Response error text:', text);
+                    throw new Error(`HTTP ${response.status}: ${text}`);
+                });
+            }
+            
+            // JSON parse et
+            return response.text().then(text => {
+                console.log('Response text:', text);
+                try {
+                    return JSON.parse(text);
+                } catch (e) {
+                    console.error('JSON parse error:', e);
+                    throw new Error('Sunucudan geçersiz yanıt alındı.');
+                }
+            });
+        })
+        .then(data => {
+            console.log('Response data:', data);
+            
+            if (!data) {
+                throw new Error('Sunucudan yanıt alınamadı.');
+            }
+            
+            if (data.success) {
+                // --- BAŞARILI OLURSA BURASI ÇALIŞIR ---
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Ziyaret Başlatıldı!',
+                    text: data.message || 'Ziyaret başarıyla başlatıldı.',
+                    timer: 1500,
+                    showConfirmButton: false
+                });
+                
+                // Kilitleri açan ve FORMLARI YÜKLEYEN fonksiyonu çağırıyoruz
+                updateUIForStartedVisit(); 
+            } else {
+                // --- BAŞARISIZ OLURSA (Konum Hatası) ---
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Konum Hatası',
+                    text: data.message || 'Bilinmeyen bir hata oluştu.',
+                    confirmButtonText: 'Tekrar Dene'
+                });
+            }
+        })
+        .catch(error => {
+            console.error('Fetch hatası:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'Bağlantı Hatası',
+                text: 'Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edin ve tekrar deneyin.',
+                confirmButtonText: 'Tamam'
+            });
+        });
+    }
+
+    function showError(error) {
+        let errorMessage = 'Konum alınamadı.';
+        let showRetryButton = false;
+        let showContinueButton = false;
+        
+        switch(error.code) {
+            case error.PERMISSION_DENIED:
+                errorMessage = 'Konum izni verilmedi. Lütfen izin verip tekrar deneyin.';
+                break;
+            case error.POSITION_UNAVAILABLE:
+                errorMessage = 'Konum bilgisi alınamadı. Lütfen açık alanda tekrar deneyin.';
+                showRetryButton = locationAttemptCount < maxLocationAttempts;
+                showContinueButton = true;
+                break;
+            case error.TIMEOUT:
+                errorMessage = 'Konum alınırken zaman aşımı oluştu. Lütfen tekrar deneyin.';
+                showRetryButton = locationAttemptCount < maxLocationAttempts;
+                showContinueButton = true;
+                break;
+            default:
+                errorMessage = 'Konum alınamadı. Lütfen tekrar deneyin.';
+                showRetryButton = locationAttemptCount < maxLocationAttempts;
+                showContinueButton = true;
+                break;
+        }
+        
+        // Eğer maksimum deneme sayısına ulaşıldıysa, sadece "Devam Et" göster
+        if (locationAttemptCount >= maxLocationAttempts) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'Konum Alınamadı',
+                html: errorMessage + '<br><br>Konum olmadan ziyareti başlatmaya devam edebilirsiniz. Ziyaret sırasında konum gerekli olacaktır.<br><br><small>GPS\'in açık olduğundan ve açık alanda olduğunuzdan emin olun.</small>',
+                confirmButtonText: 'Devam Et',
+                showCancelButton: true,
+                cancelButtonText: 'İptal'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    // Konum olmadan ziyareti başlat
+                    sendLocationToServerWithFallback();
+                }
+            });
+            return;
+        }
+        
+        Swal.fire({
+            icon: 'error',
+            title: 'Konum Hatası',
+            text: errorMessage,
+            confirmButtonText: showRetryButton ? 'Tekrar Dene' : (showContinueButton ? 'Devam Et' : 'Tamam'),
+            showCancelButton: showContinueButton || showRetryButton,
+            cancelButtonText: 'İptal'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                if (showRetryButton) {
+                    // Tekrar deneme
+                    startVisit();
+                } else if (showContinueButton) {
+                    // Konum olmadan devam et
+                    sendLocationToServerWithFallback();
+                }
+            }
+        });
+    }
+
+    // 3. Arayüzü Güncelleme ve Formları Önden Yükleme
+    let visitStarted = false;
+    let popStateHandler = null;
+    let beforeUnloadHandler = null;
+    
+    function updateUIForStartedVisit() {
+        visitStarted = true;
+        
+        // Eğer önceki listener'lar varsa kaldır (duplicate önleme)
+        if (popStateHandler) {
+            window.removeEventListener('popstate', popStateHandler);
+        }
+        if (beforeUnloadHandler) {
+            window.removeEventListener('beforeunload', beforeUnloadHandler);
+        }
+        
+        // Browser geri/ileri tuşlarını engelle
+        popStateHandler = function(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            Swal.fire({
+                icon: 'warning',
+                title: 'Ziyaret Devam Ediyor',
+                text: 'Önce ziyareti tamamlayın. Ziyareti bitirmek için "Ziyareti Bitir" butonuna basın.',
+                confirmButtonText: 'Tamam'
+            });
+            // History'ye geri ekle
+            window.history.pushState(null, null, window.location.href);
+        };
+        window.addEventListener('popstate', popStateHandler);
+        
+        // History state ekle
+        window.history.pushState(null, null, window.location.href);
+        
+        // Sayfa kapatılırken uyarı göster
+        beforeUnloadHandler = function(event) {
+            if (visitStarted) {
+                const message = 'Ziyaret devam ediyor. Çıkmak istediğinize emin misiniz? Ziyareti bitirmek için "Ziyareti Bitir" butonuna basın.';
+                event.preventDefault();
+                event.returnValue = message;
+                return message;
+            }
+        };
+        window.addEventListener('beforeunload', beforeUnloadHandler);
+        
+        // Butonu değiştir
+        let btn = document.querySelector('.btn-start-visit');
+        if(btn){
+            btn.innerHTML = '<i class="fas fa-stop-circle me-2"></i> Ziyareti Bitir';
+            btn.classList.add('btn-started');
+            btn.setAttribute('onclick', 'finishVisit()');
+        }
+        
+        // Kilit ikonlarını kaldır
+        document.querySelectorAll('.lock-icon-area').forEach(el => {
+            el.innerHTML = '<i class="fas fa-chevron-right text-primary"></i>';
+        });
+
+        // Formlara tıklanabilir yap ve ARKA PLANDA YÜKLE
+        document.querySelectorAll('.survey-item').forEach(item => {
+            item.style.opacity = '1';
+            item.style.cursor = 'pointer';
+            
+            // Tıklama olayını ekle
+            item.onclick = function() {
+                let url = this.getAttribute('data-url');
+                if(url) window.location.href = url;
+            };
+
+            // --- İŞTE O KOD BURADA OLMALI (BAŞARILI OLUNCA ÇALIŞSIN) ---
+            let url = item.getAttribute('data-url');
+            if(url) {
+                let preloadFrame = document.createElement('iframe');
+                preloadFrame.style.display = 'none';
+                preloadFrame.src = url;
+                document.body.appendChild(preloadFrame);
+            }
+            // -----------------------------------------------------------
+        });
+        
+        // GPS takibini başlat - KALDIRILDI (konum izni mesajını önlemek için)
+        // startLocationTracking();
+    }
+    
+    // GPS Takibi - Gezinme Sınırı Kontrolü
+    let locationWatchId = null;
+    let warningShown = false;
+    
+    function startLocationTracking() {
+        const taskId = parseInt("{{ task.id }}", 10);
+        {% if task.customer.latitude and task.customer.longitude %}
+        const customerLat = parseFloat({{ task.customer.latitude }});
+        const customerLng = parseFloat({{ task.customer.longitude }});
+        {% else %}
+        const customerLat = 0;
+        const customerLng = 0;
+        {% endif %}
+        
+        if (!customerLat || !customerLng || customerLat === 0 || customerLng === 0) {
+            console.log('Müşteri konumu yok, GPS takibi başlatılamadı');
+            return;
+        }
+        
+        // Mesafe kuralı kontrolü - Eğer kapalıysa GPS takibi yapma
+        fetch('/api/get-distance-rule/')
+            .then(response => response.json())
+            .then(ruleData => {
+                const distanceRuleEnabled = ruleData.distance_rule === true || ruleData.distance_rule === 'True';
+                
+                if (!distanceRuleEnabled) {
+                    console.log('Mesafe kuralı kapalı, GPS takibi başlatılmadı');
+                    return;
+                }
+                
+                // Gezinme sınırını al
+                return fetch('/api/get-wander-radius/');
+            })
+            .then(response => {
+                if (!response) return; // Mesafe kuralı kapalıysa response yok
+                return response.json();
+            })
+            .then(data => {
+                if (!data) return; // Mesafe kuralı kapalıysa data yok
+                
+                const wanderRadius = parseFloat(data.wander_radius || 500);
+                const warningThreshold = wanderRadius * 0.95; // %95'inde uyarı
+                
+                if (navigator.geolocation) {
+                    locationWatchId = navigator.geolocation.watchPosition(
+                        (position) => {
+                            const userLat = position.coords.latitude;
+                            const userLng = position.coords.longitude;
+                            const distance = calculateDistance(userLat, userLng, customerLat, customerLng);
+                            
+                            // Uyarı eşiğinde mi?
+                            if (distance >= warningThreshold && distance < wanderRadius && !warningShown) {
+                                warningShown = true;
+                                Swal.fire({
+                                    icon: 'warning',
+                                    title: 'Dikkat!',
+                                    text: `Mağaza konumundan uzaklaşıyorsunuz. (${Math.round(distance)}m)`,
+                                    confirmButtonText: 'Tamam',
+                                    allowOutsideClick: false
+                                }).then(() => {
+                                    warningShown = false;
+                                });
+                            }
+                            
+                            // Gezinme sınırını aştı mı?
+                            if (distance >= wanderRadius) {
+                                // GPS takibini durdur
+                                if (locationWatchId) {
+                                    navigator.geolocation.clearWatch(locationWatchId);
+                                    locationWatchId = null;
+                                }
+                                
+                                Swal.fire({
+                                    icon: 'warning',
+                                    title: 'Mesafe Aşıldı',
+                                    html: `Mağaza konumundan uzaklaştınız.<br>Mesafe: ${Math.round(distance)}m<br>Limit: ${wanderRadius}m<br><br>Ziyaret otomatik bitirilmedi. Devam etmek için yeniden mağazaya yaklaşın veya manuel olarak "Ziyareti Bitir" butonuna basın.`,
+                                    confirmButtonText: 'Tamam',
+                                    allowOutsideClick: false
+                                });
+                            }
+                        },
+                        (error) => {
+                            console.error('GPS hatası:', error);
+                        },
+                        {
+                            enableHighAccuracy: true,
+                            timeout: 10000,
+                            maximumAge: 0
+                        }
+                    );
+                }
+            })
+            .catch(error => {
+                console.error('Gezinme sınırı alınamadı:', error);
+            });
+    }
+    
+    // Mesafe hesaplama fonksiyonu (Haversine formülü)
+    function calculateDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371000; // Dünya yarıçapı (metre)
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c; // Metre cinsinden mesafe
+    }
+    
+    // Otomatik ziyaret bitirme
+    function finishVisitAutomatically(taskId) {
+        const taskIdInt = parseInt(taskId, 10);
+        fetch(`/api/finish-visit/${taskIdInt}/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                window.location.href = "{% url 'mobile_home' %}";
+            }
+        })
+        .catch(error => {
+            console.error('Ziyaret bitirilemedi:', error);
+            window.location.href = "{% url 'mobile_home' %}";
+        });
+    }
+    
+    // Sayfa kapatılırken GPS takibini durdur
+    window.addEventListener('beforeunload', function() {
+        if (locationWatchId) {
+            navigator.geolocation.clearWatch(locationWatchId);
+        }
+    });
+
+    // Geri tuşu kontrolü (ana sayfaya dönmeyi engelle)
+    function confirmGoBack(event) {
+        if (visitStarted) {
+            event.preventDefault();
+            event.stopPropagation();
+            Swal.fire({
+                icon: 'warning',
+                title: 'Ziyaret Devam Ediyor',
+                text: 'Önce ziyareti tamamlayın. Ziyareti bitirmek için "Ziyareti Bitir" butonuna basın.',
+                confirmButtonText: 'Tamam'
+            });
+            return false;
+        }
+        return true;
+    }
+    
+    {% if can_act %}
+    // Sayfa yüklendiğinde ziyaret durumunu kontrol et (sadece görevin sahibi)
+    document.addEventListener('DOMContentLoaded', function() {
+        const taskId = parseInt("{{ task.id }}", 10);
+        
+        // Ziyaret başlatılmış mı kontrol et
+        fetch(`/api/check-visit-status/${taskId}/`, {
+            method: 'GET',
+            headers: {
+                'X-CSRFToken': getCookie('csrftoken') || '{{ csrf_token }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.is_started) {
+                visitStarted = true;
+                // UI'ı güncelle
+                updateUIForStartedVisit();
+            }
+        })
+        .catch(error => {
+            console.error('Ziyaret durumu kontrol edilemedi:', error);
+        });
+    });
+    {% endif %}
+    
+    function finishVisit() {
+        const taskId = parseInt("{{ task.id }}", 10);
+        
+        // Önce zorunlu soruları kontrol et
+        fetch(`/api/check-required-surveys/${taskId}/`, {
+            method: 'GET',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.missing_required && data.missing_required.length > 0) {
+                // Eksik zorunlu sorular var
+                let missingList = data.missing_required.map(s => `• ${s.title}`).join('<br>');
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Eksik Zorunlu Anketler',
+                    html: 'Lütfen aşağıdaki zorunlu anketleri tamamlayın:<br><br>' + missingList,
+                    confirmButtonText: 'Tamam'
+                });
+            } else {
+                // Tüm zorunlu sorular tamamlanmış, ziyareti bitir
+                Swal.fire({
+                    title: 'Ziyareti Bitir?',
+                    text: 'Ziyareti tamamlamak istediğinize emin misiniz?',
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonText: 'Evet, Bitir',
+                    cancelButtonText: 'İptal'
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        // Ziyareti bitir
+                        fetch(`/api/finish-visit/${taskId}/`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': '{{ csrf_token }}'
+                            }
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                visitStarted = false; // Ziyaret bitti, artık engelleme yapma
+                                
+                                // Event listener'ları kaldır
+                                if (popStateHandler) {
+                                    window.removeEventListener('popstate', popStateHandler);
+                                    popStateHandler = null;
+                                }
+                                if (beforeUnloadHandler) {
+                                    window.removeEventListener('beforeunload', beforeUnloadHandler);
+                                    beforeUnloadHandler = null;
+                                }
+                                
+                                Swal.fire({
+                                    icon: 'success',
+                                    title: 'Ziyaret Tamamlandı!',
+                                    timer: 1500,
+                                    showConfirmButton: false
+                                }).then(() => {
+                                    window.location.href = "{% url 'mobile_home' %}";
+                                });
+                            } else {
+                                Swal.fire('Hata', data.message || 'Ziyaret bitirilemedi.', 'error');
+                            }
+                        })
+                        .catch(error => {
+                            Swal.fire('Hata', 'Sunucu bağlantı hatası!', 'error');
+                        });
+                    }
+                });
+            }
+        })
+        .catch(error => {
+            Swal.fire('Hata', 'Kontrol edilemedi!', 'error');
+        });
+    }
+</script>
+
+{% endblock %}

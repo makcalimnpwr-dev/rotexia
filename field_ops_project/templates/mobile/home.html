@@ -1,0 +1,360 @@
+{% extends 'base_mobile.html' %}
+
+{% block content %}
+
+{% if messages %}
+    {% for message in messages %}
+    <div class="alert alert-warning alert-dismissible fade show" role="alert" style="margin: 15px; border-radius: 12px;">
+        <i class="fas fa-exclamation-triangle me-2"></i>{{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endfor %}
+{% endif %}
+
+{% if has_team %}
+<div class="px-3 pt-2">
+  <div class="btn-group w-100" role="group" aria-label="Sekmeler">
+    <a href="{% url 'mobile_home' %}" class="btn btn-primary">Benim</a>
+    <a href="{% url 'mobile_team_home' %}" class="btn btn-outline-primary">Ekip</a>
+  </div>
+</div>
+{% endif %}
+
+<!-- Aktif ziyaret kontrolü - JavaScript ile engelleme -->
+{% if active_visit %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        Swal.fire({
+            icon: 'warning',
+            title: 'Önce Ziyareti Tamamlayın',
+            html: 'Devam eden bir ziyaret var: <strong>{{ active_visit.customer.name }}</strong><br><br>Lütfen önce bu ziyareti tamamlayın. Ziyareti bitirmek için görev detay sayfasına gidip "Ziyareti Bitir" butonuna basın.',
+            confirmButtonText: 'Görev Detayına Git',
+            showCancelButton: true,
+            cancelButtonText: 'Tamam',
+            allowOutsideClick: false,
+            allowEscapeKey: false
+        }).then((result) => {
+            if (result.isConfirmed) {
+                window.location.href = "{% url 'mobile_task_detail' active_visit.id %}";
+            }
+        });
+        
+        // Sayfa içeriğini gizle (sadece uyarı görünsün)
+        document.querySelector('.hero-card')?.style.setProperty('display', 'none', 'important');
+        document.querySelector('.section-title')?.style.setProperty('display', 'none', 'important');
+        document.querySelectorAll('.task-card').forEach(card => {
+            card.style.setProperty('pointer-events', 'none', 'important');
+            card.style.setProperty('opacity', '0.5', 'important');
+        });
+    });
+</script>
+{% endif %}
+
+<!-- Konum İzni Kontrolü - Sayfa yüklenirken çalışır -->
+<div id="locationPermissionCheck" style="display: none;"></div>
+
+<div class="hero-card">
+    <a href="#" class="btn-break-hero" id="breakBtn" onclick="toggleBreak(); return false;">
+        <span id="breakTimer" class="break-timer d-none">00:00:00</span>
+        <i class="fas fa-mug-hot"></i>
+        <span id="breakBtnText">Mola</span>
+    </a>
+
+    <div class="progress-ring" style="--prog: {{ progress_percentage }}%;">
+        <div class="progress-text">
+            <div class="percent-val">%{{ progress_percentage }}</div>
+            <div class="percent-label">Tamamlandı</div>
+        </div>
+    </div>
+    
+    <div class="d-flex justify-content-between mt-4 text-center">
+        <div>
+            <h4 class="m-0 fw-bold">{{ completed_tasks }}</h4>
+            <small class="text-white-50" style="font-size: 11px;">TAMAMLANAN</small>
+        </div>
+        <div>
+            <h4 class="m-0 fw-bold">{{ total_tasks }}</h4>
+            <small class="text-white-50" style="font-size: 11px;">TOPLAM HEDEF</small>
+        </div>
+    </div>
+</div>
+
+<div class="section-title">Bugünün Ziyaretleri</div>
+
+{% for task in tasks %}
+<div class="task-card {% if task.status == 'completed' %}completed{% else %}active{% endif %}" onclick="location.href='{% url 'mobile_task_detail' task.id %}'">
+    <div class="task-info">
+        <h6>{{ task.customer.name }}</h6>
+        <p>
+            <i class="fas fa-map-pin me-1 text-danger"></i> 
+            {{ task.customer.district }} / {{ task.customer.city }}
+        </p>
+    </div>
+    
+    {% if task.status == 'completed' %}
+        <div class="text-success"><i class="fas fa-check-circle fa-2x"></i></div>
+    {% else %}
+        <div class="btn-go">
+            <i class="fas fa-chevron-right"></i>
+        </div>
+    {% endif %}
+</div>
+{% empty %}
+<div class="text-center p-5 text-muted">
+    <i class="fas fa-check-circle fa-3x mb-3 text-success opacity-25"></i>
+    <p>Harika! Bugün için atanmış ziyaretin yok.</p>
+</div>
+{% endfor %}
+
+<script>
+    // Sayfa yüklendiğinde konum iznini kontrol et
+    let locationCheckDone = false; // Kontrol yapıldı mı?
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        // Eğer daha önce kontrol yapıldıysa ve izin verildiyse, tekrar kontrol etme
+        const locationPermissionGranted = localStorage.getItem('locationPermissionGranted');
+        if (locationPermissionGranted === 'true') {
+            // İzin daha önce verilmiş, direkt uygulamayı aç
+            console.log('Konum izni daha önce verilmiş, uygulama açılıyor');
+            document.getElementById('locationPermissionCheck').style.display = 'none';
+            return;
+        }
+        
+        checkLocationPermission();
+    });
+
+    function checkLocationPermission() {
+        if (locationCheckDone) {
+            return; // Zaten kontrol yapıldı, tekrar yapma
+        }
+        
+        if (!navigator.geolocation) {
+            // Geolocation desteklenmiyor
+            Swal.fire({
+                icon: 'error',
+                title: 'Konum Servisi Desteklenmiyor',
+                html: 'Cihazınız konum servisini desteklemiyor. Lütfen güncel bir tarayıcı kullanın.',
+                confirmButtonText: 'Tamam',
+                allowOutsideClick: true,
+                allowEscapeKey: true
+            });
+            locationCheckDone = true;
+            return;
+        }
+
+        // Konum iznini kontrol et - hızlı timeout ile
+        navigator.geolocation.getCurrentPosition(
+            function(position) {
+                // İzin var ve konum alındı - Uygulama kullanılabilir
+                console.log('Konum izni verildi ve konum alındı:', position.coords.latitude, position.coords.longitude);
+                document.getElementById('locationPermissionCheck').style.display = 'none';
+                localStorage.setItem('locationPermissionGranted', 'true');
+                locationCheckDone = true;
+            },
+            function(error) {
+                locationCheckDone = true; // Kontrol yapıldı, tekrar yapma
+                
+                // İzin reddedildiyse engelle, diğer durumlarda uygulamayı aç
+                if (error.code === error.PERMISSION_DENIED) {
+                    handleLocationError(error);
+                } else {
+                    // Timeout, position unavailable veya diğer hatalar - Uygulamayı aç ama uyarı ver
+                    let errorMessage = '';
+                    if (error.code === error.TIMEOUT) {
+                        errorMessage = 'Konum alınırken zaman aşımı oluştu. GPS sinyali zayıf olabilir. Uygulamayı kullanabilirsiniz, ancak ziyaret başlatırken konum gerekli olacaktır.';
+                    } else if (error.code === error.POSITION_UNAVAILABLE) {
+                        errorMessage = 'Konum servisi şu anda kullanılamıyor. Uygulamayı kullanabilirsiniz, ancak ziyaret başlatırken konum gerekli olacaktır.';
+                    } else {
+                        errorMessage = 'Konum alınamadı. Uygulamayı kullanabilirsiniz, ancak ziyaret başlatırken konum gerekli olacaktır.';
+                    }
+                    
+                    Swal.fire({
+                        icon: 'warning',
+                        title: 'Konum Alınamadı',
+                        html: errorMessage + '<br><br><small>Lütfen GPS\'in açık olduğundan ve açık alanda olduğunuzdan emin olun.</small>',
+                        confirmButtonText: 'Tamam, Devam Et',
+                        allowOutsideClick: true,
+                        allowEscapeKey: true
+                    }).then(() => {
+                        // Uygulamayı aç
+                        document.getElementById('locationPermissionCheck').style.display = 'none';
+                        localStorage.setItem('locationPermissionGranted', 'true');
+                    });
+                }
+            },
+            {
+                enableHighAccuracy: false, // Hızlı sonuç için false (GPS yerine WiFi/hücresel kullanır)
+                timeout: 5000, // 5 saniye timeout - hızlı
+                maximumAge: 600000 // 10 dakika önceki cache'lenmiş konumu kabul et
+            }
+        );
+    }
+
+    function handleLocationError(error) {
+        // Sadece izin reddedildiyse buraya gelir
+        Swal.fire({
+            icon: 'error',
+            title: 'Konum İzni Gerekli',
+            html: 'Konum izni gereklidir!<br><br>Uygulamayı kullanabilmek için konum iznini açmanız gerekiyor.',
+            confirmButtonText: 'Ayarlara Git',
+            showCancelButton: true,
+            cancelButtonText: 'İptal',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            didOpen: () => {
+                // Sayfa içeriğini gizle
+                document.querySelector('.hero-card')?.style.setProperty('display', 'none', 'important');
+                document.querySelector('.section-title')?.style.setProperty('display', 'none', 'important');
+                document.querySelectorAll('.task-card').forEach(card => {
+                    card.style.setProperty('display', 'none', 'important');
+                });
+            }
+        }).then((result) => {
+            if (result.isConfirmed) {
+                // Ayarlara yönlendir (mobil cihazlar için)
+                if (/Android/i.test(navigator.userAgent)) {
+                    // Android için tarayıcı ayarlarına yönlendir
+                    Swal.fire({
+                        icon: 'info',
+                        title: 'Konum İzni Gerekli',
+                        html: 'Lütfen tarayıcı ayarlarından konum iznini açın.<br><br><strong>Chrome için:</strong><br>Tarayıcı menüsü (3 nokta) > Ayarlar > Site Ayarları > Konum > İzin Ver<br><br><strong>Veya:</strong><br>Cihaz Ayarları > Uygulamalar > Chrome > İzinler > Konum > İzin Ver',
+                        confirmButtonText: 'Tamam',
+                        width: '90%'
+                    });
+                } else if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+                    // iOS için ayarlara yönlendir
+                    Swal.fire({
+                        icon: 'info',
+                        title: 'Konum İzni Gerekli',
+                        html: 'Lütfen Safari ayarlarından konum iznini açın.<br><br><strong>Safari için:</strong><br>Ayarlar > Safari > Konum Servisleri > İzin Ver<br><br><strong>Veya:</strong><br>Ayarlar > Gizlilik > Konum Servisleri > Safari Web Siteleri > İzin Ver',
+                        confirmButtonText: 'Tamam',
+                        width: '90%'
+                    });
+                } else {
+                    // Diğer cihazlar için genel ayarlar
+                    Swal.fire({
+                        icon: 'info',
+                        title: 'Konum İzni Gerekli',
+                        html: 'Lütfen tarayıcı ayarlarından konum iznini açın.<br><br>Tarayıcı menüsünden Site Ayarları > Konum > İzin Ver',
+                        confirmButtonText: 'Tamam'
+                    });
+                }
+                // 5 saniye sonra tekrar kontrol et (sadece bir kez)
+                setTimeout(() => {
+                    localStorage.removeItem('locationPermissionGranted');
+                    location.reload();
+                }, 5000);
+            } else if (result.dismiss === Swal.DismissReason.cancel) {
+                // İptal edildi, uygulamayı açma - kullanıcı manuel olarak sayfayı yenilemeli
+            }
+        });
+    }
+
+    // --- MOLA (Sayaç + Engelleme) ---
+    let breakInterval = null;
+
+    function formatDuration(ms) {
+        const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+        const h = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+        const m = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+        const s = String(totalSeconds % 60).padStart(2, '0');
+        return `${h}:${m}:${s}`;
+    }
+
+    function isBreakActive() {
+        return localStorage.getItem('breakActive') === 'true';
+    }
+
+    function getBreakStartedAt() {
+        const v = localStorage.getItem('breakStartedAt');
+        const n = v ? parseInt(v, 10) : NaN;
+        return Number.isFinite(n) ? n : null;
+    }
+
+    function getBreakLastMs() {
+        const v = localStorage.getItem('breakLastMs');
+        const n = v ? parseInt(v, 10) : NaN;
+        return Number.isFinite(n) ? n : null;
+    }
+
+    function renderBreakUI() {
+        const btn = document.getElementById('breakBtn');
+        const btnText = document.getElementById('breakBtnText');
+        const timerEl = document.getElementById('breakTimer');
+        if (!btn || !btnText || !timerEl) return;
+
+        if (isBreakActive()) {
+            btn.classList.add('break-active');
+            btnText.textContent = 'Mola Bitir';
+            timerEl.classList.remove('d-none');
+            timerEl.classList.remove('inactive');
+        } else {
+            btn.classList.remove('break-active');
+            btnText.textContent = 'Mola';
+            const last = getBreakLastMs();
+            if (last !== null) {
+                timerEl.classList.remove('d-none');
+                timerEl.classList.add('inactive');
+                timerEl.textContent = formatDuration(last);
+            } else {
+                timerEl.classList.add('d-none');
+                timerEl.textContent = '00:00:00';
+            }
+        }
+    }
+
+    function startBreakTimer() {
+        if (breakInterval) clearInterval(breakInterval);
+        const timerEl = document.getElementById('breakTimer');
+        const startedAt = getBreakStartedAt();
+        if (!timerEl || !startedAt) return;
+
+        // İlk değeri anında bas
+        timerEl.textContent = formatDuration(Date.now() - startedAt);
+
+        breakInterval = setInterval(() => {
+            const elapsed = Date.now() - startedAt;
+            timerEl.textContent = formatDuration(elapsed);
+        }, 1000);
+    }
+
+    function stopBreakTimer() {
+        if (breakInterval) {
+            clearInterval(breakInterval);
+            breakInterval = null;
+        }
+    }
+
+    function toggleBreak() {
+        if (isBreakActive()) {
+            // bitir
+            const startedAt = getBreakStartedAt();
+            if (startedAt) {
+                localStorage.setItem('breakLastMs', String(Date.now() - startedAt));
+            }
+            localStorage.removeItem('breakActive');
+            localStorage.removeItem('breakStartedAt');
+            stopBreakTimer();
+            renderBreakUI();
+            Swal.fire({ icon: 'success', title: 'Mola Bitti', timer: 900, showConfirmButton: false });
+        } else {
+            // başlat
+            localStorage.setItem('breakActive', 'true');
+            localStorage.setItem('breakStartedAt', String(Date.now()));
+            localStorage.removeItem('breakLastMs');
+            renderBreakUI();
+            startBreakTimer();
+            Swal.fire({ icon: 'info', title: 'Mola Başladı', text: 'Mola bitene kadar ziyaret başlatamazsınız.', timer: 1400, showConfirmButton: false });
+        }
+    }
+
+    // Sayfa açılışında mola durumunu yükle
+    document.addEventListener('DOMContentLoaded', function() {
+        renderBreakUI();
+        if (isBreakActive()) {
+            startBreakTimer();
+        }
+    });
+</script>
+
+{% endblock %}

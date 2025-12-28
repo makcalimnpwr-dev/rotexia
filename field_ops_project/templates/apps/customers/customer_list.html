@@ -1,0 +1,306 @@
+{% extends 'base.html' %}
+{% load custom_tags %}
+{% load l10n %} {% block content %}
+
+<div id="loadingOverlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:9999; flex-direction:column; justify-content:center; align-items:center; color:white;">
+    <div class="spinner-border text-light" style="width: 3rem; height: 3rem;" role="status"></div>
+    <h4 class="mt-3 fw-bold">İşlem Yapılıyor...</h4>
+</div>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>Müşteri Listesi</h2>
+    <div class="d-flex gap-2">
+        <button type="button" class="btn btn-outline-info shadow-sm" data-bs-toggle="modal" data-bs-target="#addFieldModal">
+            <i class="fas fa-magic"></i> Alan Ekle
+        </button>
+        
+        <div class="dropdown">
+            <button class="btn btn-secondary shadow-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                <i class="fas fa-columns"></i> Sütunlar
+            </button>
+            <ul class="dropdown-menu p-3 shadow" style="max-height: 400px; overflow-y: auto; min-width: 250px;">
+                <li><h6 class="dropdown-header text-uppercase small fw-bold">Temel Bilgiler</h6></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="sys_id" checked onchange="toggleColumn('sys_id')"> Sistem ID</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="code" checked onchange="toggleColumn('code')"> Müşteri Kodu</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="name" checked onchange="toggleColumn('name')"> Müşteri Adı</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="cari" checked onchange="toggleColumn('cari')"> Cari / Firma</label></li>
+                
+                <li><hr class="dropdown-divider"></li>
+                <li><h6 class="dropdown-header text-uppercase small fw-bold">İletişim & Konum</h6></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="city" checked onchange="toggleColumn('city')"> İl</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="district" checked onchange="toggleColumn('district')"> İlçe</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="auth" checked onchange="toggleColumn('auth')"> Yetkili Kişi</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="phone" checked onchange="toggleColumn('phone')"> Telefon</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="address" onchange="toggleColumn('address')"> Adres</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="latitude" onchange="toggleColumn('latitude')"> Enlem</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="longitude" onchange="toggleColumn('longitude')"> Boylam</label></li>
+
+                <li><hr class="dropdown-divider"></li>
+                <li><h6 class="dropdown-header text-uppercase small fw-bold text-info">Özel Alanlar</h6></li>
+                {% for cf in custom_fields %}
+                    <li><label class="dropdown-item"><input type="checkbox" class="col-toggle form-check-input me-2" value="custom_{{ cf.slug }}" checked onchange="toggleColumn('custom_{{ cf.slug }}')"> {{ cf.name }}</label></li>
+                {% endfor %}
+            </ul>
+        </div>
+
+        <button onclick="downloadExcel()" class="btn btn-success shadow-sm"><i class="fas fa-file-excel"></i> İndir</button>
+        <button type="button" class="btn btn-outline-success shadow-sm" data-bs-toggle="modal" data-bs-target="#importModal"><i class="fas fa-file-upload"></i> Yükle</button>
+        <a href="{% url 'add_customer' %}" class="btn btn-primary shadow-sm"><i class="fas fa-plus"></i> Yeni</a>
+    </div>
+</div>
+
+<div class="accordion shadow-sm mb-4" id="filterAccordion">
+    <div class="accordion-item border-0">
+        <h2 class="accordion-header" id="headingFilter">
+            <button class="accordion-button {% if not request.GET %}collapsed{% endif %} bg-light text-dark fw-bold" type="button" data-bs-toggle="collapse" data-bs-target="#collapseFilter">
+                <i class="fas fa-filter me-2"></i> Detaylı Filtreleme Seçenekleri
+            </button>
+        </h2>
+        <div id="collapseFilter" class="accordion-collapse collapse {% if request.GET %}show{% endif %}" data-bs-parent="#filterAccordion">
+            <div class="accordion-body bg-light">
+                <form method="get">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-12 mb-2">
+                            <input type="text" name="search" class="form-control" placeholder="Hızlı Arama (Kod, Ad, Yetkili)..." value="{{ f_search }}">
+                        </div>
+                        <div class="col-md-2"><label class="small text-muted fw-bold">Müşteri Kodu</label><input type="text" name="f_code" class="form-control form-control-sm" value="{{ f_code }}"></div>
+                        <div class="col-md-3"><label class="small text-muted fw-bold">Müşteri Adı</label><input type="text" name="f_name" class="form-control form-control-sm" value="{{ f_name }}"></div>
+                        <div class="col-md-2">
+                            <label class="small text-muted fw-bold">Cari / Firma</label>
+                            <select name="f_cari" class="form-select form-select-sm">
+                                <option value="">Tümü</option>
+                                {% for c in cariler %}<option value="{{ c.id }}" {% if f_cari == c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-2"><label class="small text-muted fw-bold">İl</label><input type="text" name="f_city" class="form-control form-control-sm" value="{{ f_city }}"></div>
+                        <div class="col-md-3"><label class="small text-muted fw-bold">İlçe</label><input type="text" name="f_district" class="form-control form-control-sm" value="{{ f_district }}"></div>
+                        
+                        {% for cf in custom_fields %}
+                        <div class="col-md-2">
+                            <label class="small text-muted fw-bold text-info">{{ cf.name }}</label>
+                            <input type="text" name="custom_{{ cf.slug }}" class="form-control form-control-sm border-info" value="{{ filter_values|get_item:cf.slug|default:'' }}">
+                        </div>
+                        {% endfor %}
+
+                        <div class="col-md-2"><button type="submit" class="btn btn-dark btn-sm w-100"><i class="fas fa-search"></i> Sonuçları Getir</button></div>
+                        <input type="hidden" name="sort" value="{{ current_sort }}">
+                        <input type="hidden" name="dir" value="{{ current_dir }}">
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<form id="bulkForm" action="{% url 'bulk_customer_action' %}" method="post">
+    {% csrf_token %}
+    
+    <div id="bulkActionToolbar" class="alert alert-primary shadow-sm d-flex justify-content-between align-items-center" style="display:none;">
+    <div><i class="fas fa-check-circle"></i> <span id="selectedCount" class="fw-bold">0</span> kayıt seçildi.</div>
+    <div class="d-flex gap-2">
+        <button type="button" class="btn btn-warning btn-sm fw-bold text-dark" onclick="openSelectedMap()">
+            <i class="fas fa-map-marked-alt"></i> Haritada Göster
+        </button>
+        
+        <button type="button" class="btn btn-light btn-sm text-primary fw-bold" data-bs-toggle="modal" data-bs-target="#bulkEditModal"><i class="fas fa-pen"></i> Düzenle</button>
+        <button type="submit" name="action_type" value="delete" class="btn btn-danger btn-sm fw-bold" onclick="return confirm('Silmek istediğine emin misin?');"><i class="fas fa-trash"></i> Sil</button>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 align-middle table-sm">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 40px;"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+                            
+                            <th class="col-sys_id cursor-pointer" onclick="applySort('id')">Sys ID</th>
+                            <th class="col-code cursor-pointer" onclick="applySort('code')">Kod</th>
+                            <th class="col-name cursor-pointer" onclick="applySort('name')">Müşteri</th>
+                            <th class="col-cari cursor-pointer" onclick="applySort('cari')">Cari</th>
+                            <th class="col-city cursor-pointer" onclick="applySort('city')">İl</th>
+                            <th class="col-district cursor-pointer" onclick="applySort('district')">İlçe</th>
+                            <th class="col-auth cursor-pointer" onclick="applySort('auth')">Yetkili</th>
+                            <th class="col-phone cursor-pointer" onclick="applySort('phone')">Telefon</th>
+                            <th class="col-address" style="display:none;">Adres</th>
+                            
+                            <th class="col-latitude" style="display:none;">Enlem</th>
+                            <th class="col-longitude" style="display:none;">Boylam</th>
+
+                            {% for cf in custom_fields %}
+                                <th class="col-custom_{{ cf.slug }} text-info">{{ cf.name }}</th>
+                            {% endfor %}
+                        
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for c in customers %}
+                        <tr>
+                            <td><input type="checkbox" name="selected_ids" value="{{ c.id }}" class="row-checkbox" onchange="updateBulkToolbar()"></td>
+                            
+                            <td class="col-sys_id">
+                            <span class="badge bg-secondary">M-{{ c.id }}</span>
+                            </td>
+                            <td class="col-code fw-bold">{{ c.customer_code }}</td>
+                            <td class="col-name"><a href="{% url 'edit_customer' c.pk %}" class="text-decoration-none fw-bold text-dark">{{ c.name }}</a></td>
+                            <td class="col-cari">{{ c.cari.name|default:"-" }}</td>
+                            <td class="col-city">{{ c.city }}</td>
+                            <td class="col-district">{{ c.district }}</td>
+                            <td class="col-auth">{{ c.authorized_person|default:"-" }}</td>
+                            <td class="col-phone">{{ c.phone|default:"-" }}</td>
+                            <td class="col-address" style="display:none;">{{ c.address|default:"-" }}</td>
+                            
+                            <td class="col-latitude" style="display:none;">{{ c.latitude|unlocalize|default:"" }}</td>
+                            <td class="col-longitude" style="display:none;">{{ c.longitude|unlocalize|default:"" }}</td>
+
+                            {% for cf in custom_fields %}
+                                <td class="col-custom_{{ cf.slug }}">{{ c.extra_data|get_item:cf.slug }}</td>
+                            {% endfor %}
+                            
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div class="card-footer bg-white d-flex justify-content-between align-items-center py-3">
+            <div class="text-muted small">Top: <strong>{{ paginator.count }}</strong>. Gösterilen: <strong>{{ customers.start_index }}-{{ customers.end_index }}</strong></div>
+            <nav>
+                <ul class="pagination pagination-sm mb-0">
+                    {% if customers.has_previous %}
+                        <li class="page-item"><a class="page-link" href="?page={{ customers.previous_page_number }}&sort={{ current_sort }}&dir={{ current_dir }}">Önceki</a></li>
+                    {% endif %}
+                    <li class="page-item active"><span class="page-link">{{ customers.number }}</span></li>
+                    {% if customers.has_next %}
+                        <li class="page-item"><a class="page-link" href="?page={{ customers.next_page_number }}&sort={{ current_sort }}&dir={{ current_dir }}">Sonraki</a></li>
+                    {% endif %}
+                </ul>
+            </nav>
+        </div>
+    </div>
+    
+    <div class="modal fade" id="bulkEditModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">Toplu Düzenle</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <input type="hidden" name="action_type" value="bulk_edit">
+                    <label class="form-label">Alan Seç:</label>
+                    <select name="target_field" class="form-select mb-3">
+                        <option value="city">İl</option>
+                        <option value="district">İlçe</option>
+                        <option value="cari">Cari</option>
+                        <option value="phone">Telefon</option>
+                        <option value="authorized_person">Yetkili Kişi</option>
+                        <option value="address">Adres</option>
+                    </select>
+                    <label class="form-label">Yeni Değer:</label>
+                    <input type="text" name="new_value" class="form-control">
+                </div>
+                <div class="modal-footer"><button type="submit" class="btn btn-primary">Güncelle</button></div>
+            </div>
+        </div>
+    </div>
+</form>
+
+<div class="modal fade" id="addFieldModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white"><h5 class="modal-title">Yeni Alan Ekle</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <form action="{% url 'add_custom_field' %}" method="post">{% csrf_token %}<div class="modal-body"><input type="text" name="name" class="form-control" placeholder="Örn: Stant Tipi" required></div><div class="modal-footer"><button type="submit" class="btn btn-info text-white">Oluştur</button></div></form>
+        </div>
+    </div>
+</div>
+<div id="loadingOverlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; flex-direction:column; justify-content:center; align-items:center; color:white; backdrop-filter: blur(5px);">
+    <div class="spinner-border text-info" style="width: 4rem; height: 4rem;" role="status"></div>
+    <h4 class="mt-4 fw-bold">Müşteriler Yükleniyor...</h4>
+    <p class="text-white-50">Lütfen pencereyi kapatmayın, bu işlem dosya boyutuna göre sürebilir.</p>
+</div>
+
+<div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="fas fa-file-excel"></i> Toplu Müşteri Yükle</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            
+            <form action="{% url 'import_customers' %}" method="post" enctype="multipart/form-data" onsubmit="document.getElementById('loadingOverlay').style.display='flex'">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="alert alert-light border shadow-sm mb-4">
+                        <h6 class="fw-bold text-success"><i class="fas fa-download"></i> Adım 1: Şablonu İndir</h6>
+                        <p class="small text-muted mb-2">Hata almamak için lütfen hazırladığımız Excel formatını kullanın.</p>
+                        <a href="{% url 'download_template' 'customer' %}" class="btn btn-sm btn-outline-success w-100 fw-bold">
+                            <i class="fas fa-file-download me-1"></i> Örnek Dosyayı İndir
+                        </a>
+                    </div>
+
+                    <h6 class="fw-bold text-dark"><i class="fas fa-upload"></i> Adım 2: Dosyayı Yükle</h6>
+                    <input type="file" name="excel_file" class="form-control" required accept=".xlsx, .xls">
+                    <div class="form-text small">Sadece .xlsx veya .xls dosyaları kabul edilir.</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-success w-100 py-2 fw-bold">Yüklemeyi Başlat</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    function toggleColumn(col) {
+        var disp = document.querySelector('input[value="'+col+'"]').checked ? '' : 'none';
+        document.querySelectorAll('.col-'+col).forEach(el => el.style.display = disp);
+    }
+    function downloadExcel() {
+        var cols = [];
+        document.querySelectorAll('.col-toggle:checked').forEach(c => cols.push(c.value));
+        window.location.href = "{% url 'export_customers' %}?fields=" + cols.join(',');
+    }
+    function toggleSelectAll() {
+        var main = document.getElementById('selectAll');
+        document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = main.checked);
+        updateBulkToolbar();
+    }
+    function updateBulkToolbar() {
+        var count = document.querySelectorAll('.row-checkbox:checked').length;
+        document.getElementById('selectedCount').innerText = count;
+        document.getElementById('bulkActionToolbar').style.display = count > 0 ? 'flex' : 'none';
+    }
+    function applySort(field) {
+        const urlParams = new URLSearchParams(window.location.search);
+        let currentDir = urlParams.get('dir') || 'desc';
+        let newDir = (urlParams.get('sort') === field && currentDir === 'asc') ? 'desc' : 'asc';
+        urlParams.set('sort', field);
+        urlParams.set('dir', newDir);
+        window.location.search = urlParams.toString();
+    }
+
+    // SEÇİLENLERİ HARİTADA GÖSTERME FONKSİYONU
+        function openSelectedMap() {
+    // Seçili checkboxları bul
+     var checkedBoxes = document.querySelectorAll('.row-checkbox:checked');
+    
+    if (checkedBoxes.length === 0) {
+        alert("Lütfen haritada görmek için en az bir müşteri seçin.");
+        return;
+    }
+
+    // ID'leri topla
+    var ids = [];
+    checkedBoxes.forEach(function(cb) {
+        ids.push(cb.value);
+    });
+
+    // Yeni pencerede haritayı aç
+    var url = "{% url 'customer_map_view' %}?ids=" + ids.join(',');
+    
+    // Popup olarak açmak istersen:
+    window.open(url, 'Harita', 'width=1000,height=800,scrollbars=yes');
+}
+
+</script>
+{% endblock %}

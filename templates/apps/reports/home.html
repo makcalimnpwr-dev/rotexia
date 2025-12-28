@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2>Raporlar</h2>
+</div>
+
+<div class="row g-3">
+  <div class="col-md-6 col-lg-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <i class="fas fa-file-alt text-primary"></i>
+          <div class="fw-bold">Detaylı Ziyaret Raporu</div>
+        </div>
+        <div class="text-muted small mb-3">
+          Tarih aralığına göre ziyaretleri listeler. Sütunları seçip sıralayabilir, Excel olarak indirebilirsiniz.
+        </div>
+        <a class="btn btn-primary w-100" href="{% url 'visit_detail_report' %}">
+          Aç
+        </a>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6 col-lg-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <i class="fas fa-chart-pie text-primary"></i>
+          <div class="fw-bold">Günlük Ziyaret Özeti</div>
+        </div>
+        <div class="text-muted small mb-3">
+          Seçtiğiniz gün için planlanan vs gerçekleşen görevleri; tablo ve grafiklerle özetler.
+        </div>
+        <a class="btn btn-primary w-100" href="{% url 'daily_visit_summary_report' %}">
+          Aç
+        </a>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6 col-lg-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <i class="fas fa-clipboard-list text-primary"></i>
+          <div class="fw-bold">Anket Raporları</div>
+        </div>
+        <div class="text-muted small mb-3">
+          Anket bazlı raporlar: tarih aralığı, sütun seçimi/sıralama ve Excel indir. En sonda soru-cevap kolonları bulunur.
+        </div>
+        <a class="btn btn-primary w-100" href="{% url 'survey_reports_home' %}">
+          Aç
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+

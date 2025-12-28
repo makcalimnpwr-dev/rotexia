@@ -1,0 +1,683 @@
+{% extends 'base_mobile.html' %}
+
+{% block content %}
+
+{% if messages %}
+<div class="container pt-3">
+    {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show shadow-sm">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<style>
+    /* Bu sayfada alt menü (bottom-nav) sabit kaydet butonunu kapatmasın */
+    .bottom-nav { display: none !important; }
+
+    /* 1. INPUT GİZLEME TAKTİĞİ (Görünmez ama Tıklanabilir) */
+    /* display: none KULLANMIYORUZ, çünkü o zaman form gönderilmez! */
+    .invisible-input {
+        opacity: 0;
+        position: absolute;
+        z-index: -1;
+        width: 1px;
+        height: 1px;
+    }
+
+    /* Kart Tasarımı */
+    .question-card {
+        background: #fff;
+        border: 1px solid #eef2f6;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+    }
+
+    .q-label {
+        font-weight: 700;
+        color: #2c3e50;
+        margin-bottom: 12px;
+        display: block;
+        font-size: 1.05rem;
+    }
+
+    /* KAMERA BUTONU */
+    .camera-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background-color: #f8fbff;
+        border: 2px dashed #3b82f6;
+        border-radius: 10px;
+        padding: 25px;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-align: center;
+        width: 100%;
+    }
+
+    .camera-btn:active {
+        background-color: #e0edff;
+        transform: scale(0.98);
+    }
+
+    .camera-btn svg {
+        color: #3b82f6;
+        margin-bottom: 8px;
+    }
+
+    .camera-text {
+        color: #3b82f6;
+        font-weight: 600;
+        font-size: 0.95rem;
+    }
+
+    /* ÖNİZLEME KUTUSU */
+    .preview-container {
+        display: none; /* JS ile açılacak */
+        margin-top: 15px;
+        background: #fff;
+        border: 1px solid #dee2e6;
+        border-radius: 10px;
+        padding: 10px;
+    }
+
+    .preview-img {
+        width: 80px;
+        height: 80px;
+        object-fit: cover;
+        border-radius: 8px;
+        border: 1px solid #eee;
+    }
+
+    /* Sabit kaydet alanı mobil tarayıcı alt çubuğunda görünür kalsın */
+    .fixed-bottom {
+        z-index: 6000 !important;
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+    }
+
+    /* In-app kamera modal */
+    .cam-modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.75);
+        z-index: 5000;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+    }
+    .cam-modal.show { display: flex; }
+    .cam-sheet {
+        width: 100%;
+        max-width: 520px;
+        background: #fff;
+        border-radius: 14px;
+        overflow: hidden;
+    }
+    .cam-video {
+        width: 100%;
+        height: 340px;
+        background: #000;
+        object-fit: cover;
+        display: block;
+    }
+    .cam-actions {
+        display: flex;
+        gap: 10px;
+        padding: 12px;
+        background: #fff;
+    }
+
+    /* Küçük fotoğraf simgesi (kısayol) */
+    .photo-icon-btn {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        border: 1px solid #d0d5dd;
+        background: #ffffff;
+        color: #0d6efd;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    .photo-icon-btn:active {
+        background: #eef2ff;
+    }
+
+    /* Alt (bağlı) soru kartı */
+    .child-question {
+        border-left: 3px solid #0d6efd;
+        background: #f8fbff;
+        padding: 14px;
+        border-radius: 10px;
+        margin-top: 10px;
+        display: none; /* koşul sağlanınca gösterilecek */
+    }
+    .child-question.show {
+        display: block;
+    }
+</style>
+
+<div class="container py-3 mb-5">
+    
+    <div class="d-flex align-items-center justify-content-between mb-4">
+        <div>
+            <h5 class="fw-bold mb-0">{{ task.customer.name }}</h5>
+            <small class="text-muted">{{ survey.title }}</small>
+        </div>
+        <div class="badge bg-light text-dark border p-2" id="progressText">0%</div>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" id="mainForm">
+        {% csrf_token %}
+
+        {% for item in questions_data %}
+        <div class="question-card">
+            
+            <label class="q-label">
+                <span class="badge bg-primary me-2">{{ forloop.counter }}</span>
+                {{ item.question.label }}
+                {% if item.question.required %}<span class="text-danger">*</span>{% endif %}
+            </label>
+
+            {% if item.question.input_type == 'photo' %}
+                
+                <div class="d-flex justify-content-end mb-2">
+                    <button type="button" class="photo-icon-btn" onclick="triggerCamera('{{ item.question.id }}')" aria-label="Fotoğraf çek">
+                        <i class="fas fa-camera"></i>
+                    </button>
+                </div>
+
+                <div class="photo-wrapper">
+                    <input type="file" 
+                           name="q_{{ item.question.id }}" 
+                           id="file_{{ item.question.id }}"
+                           class="invisible-input survey-input"
+                           accept="image/*"
+                           capture="camera"
+                           onchange="showPreview(this, '{{ item.question.id }}')">
+                    <input type="hidden"
+                           name="q_{{ item.question.id }}_base64"
+                           id="b64_{{ item.question.id }}"
+                           {% if item.question.required %}data-required-photo="1"{% endif %}>
+
+                    <label for="file_{{ item.question.id }}" class="camera-btn" id="btn_area_{{ item.question.id }}" onclick="startFilePoll('{{ item.question.id }}')">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M15 12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.172a3 3 0 0 0 2.12-.879l.83-.828A1 1 0 0 1 6.827 3h2.344a1 1 0 0 1 .707.293l.828.828A3 3 0 0 0 12.828 5H14a1 1 0 0 1 1 1v6zM2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2z"/>
+                            <path d="M8 11a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm0 1a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 6.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0z"/>
+                        </svg>
+                        <span class="camera-text">FOTOĞRAF ÇEK</span>
+                    </label>
+
+                    <div id="preview_area_{{ item.question.id }}" class="preview-container">
+                        <div class="d-flex align-items-center">
+                            <img id="img_{{ item.question.id }}" src="" class="preview-img">
+                            <div class="ms-3 flex-grow-1">
+                                <h6 class="text-success mb-1 small fw-bold">
+                                    <i class="fas fa-check-circle"></i> Yüklendi
+                                </h6>
+                                <label for="file_{{ item.question.id }}" class="btn btn-sm btn-outline-warning w-100">
+                                    Yeniden Çek
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            {% elif item.question.input_type == 'text' %}
+                <input type="text" name="q_{{ item.question.id }}" class="form-control p-3 survey-input" placeholder="Cevabınız..." {% if item.question.required %}required{% endif %} oninput="checkProgress()">
+
+            {% elif item.question.input_type == 'select' %}
+                <select name="q_{{ item.question.id }}" class="form-select p-3 survey-input" {% if item.question.required %}required{% endif %} onchange="checkProgress()">
+                    <option value="">Seçiniz...</option>
+                    {% for opt in item.options %}
+                        <option value="{{ opt.text }}">{{ opt.text }}</option>
+                    {% endfor %}
+                </select>
+
+            {% elif item.question.input_type == 'textarea' %}
+                <textarea name="q_{{ item.question.id }}" class="form-control p-3 survey-input" rows="3" placeholder="Detaylı açıklama..." {% if item.question.required %}required{% endif %} oninput="checkProgress()"></textarea>
+
+            {% endif %}
+
+        </div>
+
+        {% if item.child_questions %}
+            {% for child in item.child_questions %}
+            <div class="child-question" 
+                 data-parent-id="{{ child.parent_id }}" 
+                 data-trigger="{{ child.trigger_answer|default:'' }}">
+                <label class="q-label" style="font-size: 0.95rem;">
+                    <span class="badge bg-info me-2">Bağlı</span>
+                    {{ child.label }} {% if child.required %}<span class="text-danger">*</span>{% endif %}
+                </label>
+
+                {% if child.input_type == 'photo' %}
+
+                    <div class="d-flex justify-content-end mb-2">
+                        <button type="button" class="photo-icon-btn" onclick="triggerCamera('{{ child.id }}')" aria-label="Fotoğraf çek">
+                            <i class="fas fa-camera"></i>
+                        </button>
+                    </div>
+
+                    <div class="photo-wrapper">
+                        <input type="file" 
+                               name="q_{{ child.id }}" 
+                               id="file_{{ child.id }}"
+                               class="invisible-input survey-input"
+                               accept="image/*"
+                               capture="camera"
+                               onchange="showPreview(this, '{{ child.id }}')">
+                        <input type="hidden"
+                               name="q_{{ child.id }}_base64"
+                               id="b64_{{ child.id }}"
+                               {% if child.required %}data-required-photo="1"{% endif %}>
+
+                        <label for="file_{{ child.id }}" class="camera-btn" id="btn_area_{{ child.id }}" onclick="startFilePoll('{{ child.id }}')">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M15 12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.172a3 3 0 0 0 2.12-.879l.83-.828A1 1 0 0 1 6.827 3h2.344a1 1 0 0 1 .707.293l.828.828A3 3 0 0 0 12.828 5H14a1 1 0 0 1 1 1v6zM2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2z"/>
+                                <path d="M8 11a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm0 1a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 6.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0z"/>
+                            </svg>
+                            <span class="camera-text">FOTOĞRAF ÇEK</span>
+                        </label>
+
+                        <div id="preview_area_{{ child.id }}" class="preview-container">
+                            <div class="d-flex align-items-center">
+                                <img id="img_{{ child.id }}" src="" class="preview-img">
+                                <div class="ms-3 flex-grow-1">
+                                    <h6 class="text-success mb-1 small fw-bold">
+                                        <i class="fas fa-check-circle"></i> Yüklendi
+                                    </h6>
+                                    <label for="file_{{ child.id }}" class="btn btn-sm btn-outline-warning w-100">
+                                        Yeniden Çek
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                {% elif child.input_type == 'text' %}
+                    <input type="text" name="q_{{ child.id }}" class="form-control p-3 survey-input child-input" placeholder="Cevabınız..." {% if child.required %}required{% endif %} oninput="checkProgress()">
+
+                {% elif child.input_type == 'select' %}
+                    <select name="q_{{ child.id }}" class="form-select p-3 survey-input child-input" {% if child.required %}required{% endif %} onchange="checkProgress()">
+                        <option value="">Seçiniz...</option>
+                        {% for opt in child.options %}
+                            <option value="{{ opt.text }}">{{ opt.text }}</option>
+                        {% endfor %}
+                    </select>
+
+                {% elif child.input_type == 'textarea' %}
+                    <textarea name="q_{{ child.id }}" class="form-control p-3 survey-input child-input" rows="3" placeholder="Detaylı açıklama..." {% if child.required %}required{% endif %} oninput="checkProgress()"></textarea>
+
+                {% elif child.input_type == 'number' %}
+                    <input type="number" name="q_{{ child.id }}" class="form-control p-3 survey-input child-input" placeholder="0" {% if child.required %}required{% endif %} oninput="checkProgress()">
+
+                {% endif %}
+
+            </div>
+            {% endfor %}
+        {% endif %}
+        {% endfor %}
+
+        <div class="fixed-bottom p-3 bg-white border-top shadow-lg" style="z-index: 1000;">
+            <button type="submit" class="btn btn-primary w-100 btn-lg fw-bold rounded-pill">
+                KAYDET VE BİTİR
+            </button>
+        </div>
+        <div style="height: 80px;"></div>
+
+    </form>
+</div>
+
+<!-- In-app kamera modal -->
+<div class="cam-modal" id="camModal" role="dialog" aria-modal="true">
+    <div class="cam-sheet">
+        <video id="camVideo" class="cam-video" autoplay playsinline></video>
+        <canvas id="camCanvas" style="display:none;"></canvas>
+        <div class="cam-actions">
+            <button type="button" class="btn btn-outline-secondary w-100" onclick="closeCamModal()">İptal</button>
+            <button type="button" class="btn btn-primary w-100" onclick="captureCam()">Çek</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Kamera dönüşünde bazı Android WebView/Chrome sürümleri `change` event'ini geç tetikleyebiliyor
+    // veya `input.files` geç dolabiliyor. Bu yüzden kısa süre polling yapıyoruz.
+    const __filePollTimers = {};
+    let __lastPhotoId = null;
+    function showPhotoNotSupportedHelp() {
+        Swal.fire({
+            icon: 'warning',
+            title: 'Fotoğraf Uygulamaya Dönmüyor',
+            html:
+                'Bu APK (WebIntoApp WebView) kameradan dönen fotoğrafı web formuna aktaramıyor olabilir.<br><br>' +
+                '<b>Çözüm seçenekleri:</b><br>' +
+                '- WebIntoApp panelinde <b>File Upload / File Chooser</b> ve <b>Camera</b> izinlerini açın.<br>' +
+                '- Uygulama izinlerinden <b>Kamera</b> ve <b>Fotoğraflar/Medya</b> izinlerini verin.<br>' +
+                '- En garanti çözüm: sayfayı tarayıcıda açın veya farklı bir wrapper (Capacitor/Cordova) kullanın.<br><br>' +
+                '<small>Not: Eğer tarayıcıda çalışıp APK içinde çalışmıyorsa sorun %100 WebView wrapper kaynaklıdır.</small>',
+            showCancelButton: true,
+            confirmButtonText: 'Tarayıcıda Aç',
+            cancelButtonText: 'Tamam'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                try {
+                    window.open(window.location.href, '_blank');
+                } catch (e) {
+                    // no-op
+                }
+            }
+        });
+    }
+
+    function startFilePoll(id) {
+        if (__filePollTimers[id]) return;
+        const inp = document.getElementById('file_' + id);
+        if (!inp) return;
+
+        let tries = 0;
+        __filePollTimers[id] = setInterval(function() {
+            tries++;
+            if (inp.files && inp.files.length > 0) {
+                clearInterval(__filePollTimers[id]);
+                __filePollTimers[id] = null;
+                showPreview(inp, id);
+                return;
+            }
+            if (tries >= 75) { // ~15 sn (kamera dönüşü bazı WebView'larda geç gelebiliyor)
+                clearInterval(__filePollTimers[id]);
+                __filePollTimers[id] = null;
+                // Kamera açıldı ama dosya gelmediyse (WebView bug), kullanıcıya açıklama göster
+                if (!inp.files || inp.files.length === 0) {
+                    showPhotoNotSupportedHelp();
+                }
+            }
+        }, 200);
+    }
+
+    let __activeCamId = null;
+    let __camStream = null;
+
+    function renderPreviewById(id, dataUrl) {
+        const imgEl = document.getElementById('img_' + id);
+        const btnArea = document.getElementById('btn_area_' + id);
+        const previewArea = document.getElementById('preview_area_' + id);
+        const b64 = document.getElementById('b64_' + id);
+
+        if (imgEl) imgEl.src = dataUrl;
+        if (btnArea) btnArea.style.display = 'none';
+        if (previewArea) previewArea.style.display = 'block';
+        if (b64) b64.value = dataUrl;
+        checkProgress();
+    }
+
+    async function openCamModal(id) {
+        __activeCamId = id;
+        const modal = document.getElementById('camModal');
+        const video = document.getElementById('camVideo');
+        if (!modal || !video) return;
+
+        try {
+            // Not: Webintoapp WebView file upload sorununa karşı native kamera yerine WebRTC kamera kullanıyoruz.
+            __camStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { ideal: 'environment' } },
+                audio: false
+            });
+            video.srcObject = __camStream;
+            modal.classList.add('show');
+        } catch (err) {
+            console.error('Kamera açılamadı:', err);
+            const isHttps = (window.location.protocol === 'https:');
+            const msg = isHttps
+                ? 'Bu APK (WebIntoApp WebView) kamera çıktısını sayfaya geri aktaramıyor olabilir. Bu durumda fotoğraf seçimi/yükleme web tarafında çalışmaz.'
+                : 'Kamera önizlemesi için genelde HTTPS gerekir. Siteniz HTTPS değilse APK içinde WebRTC kamera çalışmaz.';
+
+            Swal.fire({
+                icon: 'warning',
+                title: 'Fotoğraf Yüklenemiyor',
+                html: msg + '<br><br>' +
+                      '<b>Öneri:</b> Aynı sayfayı cihazda Chrome/Safari ile açıp deneyin. Tarayıcıda çalışıyorsa sorun APK/WebView kaynaklıdır.',
+                showCancelButton: true,
+                confirmButtonText: 'Tarayıcıda Aç',
+                cancelButtonText: 'Tamam'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    try {
+                        window.open(window.location.href, '_blank');
+                    } catch (e) {
+                        // no-op
+                    }
+                }
+            });
+        }
+    }
+
+    function closeCamModal() {
+        const modal = document.getElementById('camModal');
+        const video = document.getElementById('camVideo');
+        if (modal) modal.classList.remove('show');
+        if (video) video.srcObject = null;
+        if (__camStream) {
+            __camStream.getTracks().forEach(t => t.stop());
+            __camStream = null;
+        }
+        __activeCamId = null;
+    }
+
+    function captureCam() {
+        const video = document.getElementById('camVideo');
+        const canvas = document.getElementById('camCanvas');
+        if (!video || !canvas || !__activeCamId) return;
+
+        const vw = video.videoWidth || 1280;
+        const vh = video.videoHeight || 720;
+        const maxW = 1280;
+        const scale = Math.min(1, maxW / vw);
+        const w = Math.round(vw * scale);
+        const h = Math.round(vh * scale);
+
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        renderPreviewById(__activeCamId, dataUrl);
+        closeCamModal();
+    }
+
+    function triggerCamera(id) {
+        const inp = document.getElementById('file_' + id);
+        __lastPhotoId = id;
+        // Webintoapp APK'da file input geri dönmeyebiliyor; önce WebRTC kamera dene.
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            openCamModal(id);
+            return;
+        }
+        // Fallback: file input
+        if (!inp) return;
+        startFilePoll(id);
+        inp.click();
+    }
+
+    // Geriye dönük: eski çağrılar varsa çalışsın
+    function openPhoto(id) {
+        triggerCamera(id);
+    }
+
+    // Çocuk sorularını göster/gizle
+    function handleChildQuestions(parentId, value) {
+        document.querySelectorAll('.child-question[data-parent-id="'+parentId+'"]').forEach(function(el){
+            const trigger = (el.getAttribute('data-trigger') || '').trim();
+            const shouldShow = trigger === '' || trigger.toLowerCase() === (value || '').toLowerCase();
+            
+            if (shouldShow) {
+                el.classList.add('show');
+            } else {
+                el.classList.remove('show');
+                // içindeki inputları temizle
+                el.querySelectorAll('input, textarea, select').forEach(function(inp){
+                    if (inp.type === 'file') {
+                        inp.value = '';
+                        // önizlemeyi sıfırla
+                        const id = inp.id.replace('file_', '');
+                        resetPhotoPreview(id);
+                    } else if (inp.type === 'radio' || inp.type === 'checkbox') {
+                        inp.checked = false;
+                    } else {
+                        inp.value = '';
+                    }
+                });
+            }
+        });
+    }
+
+    // Belirli fotoğraf önizlemesini sıfırla
+    function resetPhotoPreview(id) {
+        const btnArea = document.getElementById('btn_area_' + id);
+        const previewArea = document.getElementById('preview_area_' + id);
+        const imgEl = document.getElementById('img_' + id);
+        const fileInput = document.getElementById('file_' + id);
+
+        if (fileInput) fileInput.value = '';
+        if (imgEl) imgEl.src = '';
+        if (previewArea) previewArea.style.display = 'none';
+        if (btnArea) btnArea.style.display = 'flex';
+    }
+
+    // Fotoğraf Önizleme
+    function showPreview(input, id) {
+        if (input.files && input.files[0]) {
+            const file = input.files[0];
+            const reader = new FileReader();
+
+            const render = function(src) {
+                renderPreviewById(id, src);
+                input.classList.add('filled');
+            };
+
+            reader.onload = function(e) {
+                render(e.target.result);
+            };
+            reader.onerror = function() {
+                // FileReader başarısız olursa ObjectURL deneyelim
+                try {
+                    const url = URL.createObjectURL(file);
+                    render(url);
+                } catch (err) {
+                    console.error('Önizleme yüklenemedi', err);
+                }
+            };
+            reader.readAsDataURL(file);
+        }
+    }
+
+    // İlerleme Çubuğu Kontrolü
+    function checkProgress() {
+        // required (text/select/textarea vs) + required photo (data-required-photo)
+        var requiredInputs = document.querySelectorAll('[required], [data-required-photo="1"]');
+        var total = requiredInputs.length;
+        var filled = 0;
+
+        requiredInputs.forEach(function(inp) {
+            if (inp.tagName === 'INPUT' && inp.type === 'file') {
+                // burada file input artık required değil, ama yine de güvenli kalsın
+                if (inp.files && inp.files.length > 0) filled++;
+            } else if (inp.tagName === 'INPUT' && inp.type === 'hidden' && inp.getAttribute('data-required-photo') === '1') {
+                if (inp.value && inp.value.startsWith('data:image/')) filled++;
+            } else {
+                if ((inp.value || '').trim() !== '') filled++;
+            }
+        });
+
+        var percent = total === 0 ? 100 : Math.round((filled / total) * 100);
+        document.getElementById('progressText').innerText = percent + '%';
+        
+        // Renklendirme
+        var badge = document.getElementById('progressText');
+        if(percent == 100) {
+            badge.className = 'badge bg-success p-2';
+        } else {
+            badge.className = 'badge bg-light text-dark border p-2';
+        }
+    }
+
+    // Sayfa açıldığında kontrol et
+    document.addEventListener('DOMContentLoaded', function(){
+        checkProgress();
+
+        // Parent (select) değişince çocukları kontrol et
+        document.querySelectorAll('.question-card select').forEach(function(sel){
+            sel.addEventListener('change', function(){
+                const parentId = this.name.replace('q_', '');
+                handleChildQuestions(parentId, this.value);
+            });
+        });
+
+        // Sayfa ilk yüklenirken mevcut seçimi uygula
+        document.querySelectorAll('.question-card select').forEach(function(sel){
+            const parentId = sel.name.replace('q_', '');
+            handleChildQuestions(parentId, sel.value);
+        });
+
+        // File input'lara güvenli event dinleyicileri ekle
+        document.querySelectorAll('input[type="file"][accept*="image"]').forEach(function(inp){
+            const id = inp.id.replace('file_', '');
+            const handler = function(){
+                if (inp.files && inp.files.length > 0) {
+                    showPreview(inp, id);
+                }
+            };
+            inp.addEventListener('change', handler);
+            inp.addEventListener('input', handler);
+        });
+
+        // Kamera uygulamasından geri dönünce (APK/WebView) dosya geç gelebiliyor.
+        // Focus/visibilitychange anında son tetiklenen fotoğraf input'unu tekrar kontrol et.
+        function recheckLastPhoto() {
+            if (!__lastPhotoId) return;
+            const inp = document.getElementById('file_' + __lastPhotoId);
+            if (inp && inp.files && inp.files.length > 0) {
+                showPreview(inp, __lastPhotoId);
+            }
+        }
+        window.addEventListener('focus', recheckLastPhoto);
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible') {
+                recheckLastPhoto();
+            }
+        });
+
+        // Submit öncesi: required fotoğraf alanları dolu mu kontrol et (APK'da silent failure olmasın)
+        const form = document.getElementById('mainForm');
+        if (form) {
+            form.addEventListener('submit', function(e) {
+                const requiredPhotos = document.querySelectorAll('input[type="hidden"][data-required-photo="1"]');
+                let missing = 0;
+                requiredPhotos.forEach(function(h) {
+                    if (!h.value || !h.value.startsWith('data:image/')) missing++;
+                });
+                if (missing > 0) {
+                    e.preventDefault();
+                    Swal.fire({
+                        icon: 'warning',
+                        title: 'Zorunlu Fotoğraf Eksik',
+                        html: 'Zorunlu fotoğraf sorusu işaretlenmemiş görünüyor.<br><br>' +
+                              'Eğer kamera açılıp “Tamam” dediğiniz halde fotoğraf gelmiyorsa bu APK (WebIntoApp WebView) kaynaklı olabilir.',
+                        confirmButtonText: 'Tamam'
+                    });
+                }
+            });
+        }
+    });
+</script>
+
+{% endblock %}

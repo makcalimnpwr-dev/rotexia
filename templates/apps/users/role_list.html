@@ -1,0 +1,78 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2>Rol Yönetimi</h2>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+              <li class="breadcrumb-item"><a href="{% url 'settings_home' %}">Ayarlar</a></li>
+              <li class="breadcrumb-item active">Roller</li>
+            </ol>
+        </nav>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-4">
+        <div class="card shadow border-0">
+            <div class="card-header bg-white">
+                <h5 class="m-0 fw-bold text-success">Yeni Rol Ekle</h5>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label">Rol Adı</label>
+                        {{ form.name }} 
+                        <div class="form-text">Örn: Depo Sorumlusu, Bölge Müdürü</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Açıklama</label>
+                        <textarea name="description" class="form-control" rows="3"></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-success w-100">Ekle</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-8">
+        <div class="card shadow border-0">
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0 align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Rol Adı</th>
+                            <th>Açıklama</th>
+                            <th class="text-end">İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for role in roles %}
+                        <tr>
+                            <td><span class="badge bg-primary">{{ role.name }}</span></td>
+                            <td class="small text-muted">{{ role.description|default:"-" }}</td>
+                            <td class="text-end">
+                                <a href="{% url 'role_delete' role.pk %}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bu rolü silmek istediğinize emin misiniz?');">
+                                    <i class="fas fa-trash"></i>
+                                </a>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="3" class="text-center p-3">Henüz rol eklenmemiş.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    var roleInput = document.querySelector('#id_name');
+    if(roleInput) {
+        roleInput.classList.add('form-control');
+    }
+</script>
+{% endblock %}

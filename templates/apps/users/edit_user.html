@@ -1,0 +1,296 @@
+{% extends 'base.html' %}
+{% load custom_tags %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow border-0">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                <h5 class="m-0 fw-bold text-primary">Düzenle: {{ user.first_name }} {{ user.last_name }}</h5>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-sm btn-info text-white" data-bs-toggle="modal" data-bs-target="#addUserFieldModal">
+                        <i class="fas fa-magic me-1"></i> Kullanıcı için Özel Alan Ekle
+                    </button>
+                    <a href="{% url 'user_list' %}" class="btn btn-sm btn-light">Listeye Dön</a>
+                </div>
+            </div>
+            <div class="card-body">
+                {% if form.errors %}
+                  <div class="alert alert-danger">
+                    <div class="fw-bold mb-1">Kaydedilemedi</div>
+                    <div class="small">Lütfen aşağıdaki alanları kontrol edin.</div>
+                    {% if form.non_field_errors %}
+                      <hr class="my-2">
+                      {{ form.non_field_errors }}
+                    {% endif %}
+                  </div>
+                {% endif %}
+                <form method="post">
+                    {% csrf_token %}
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Ad</label>
+                            {{ form.first_name }}
+                            {% for err in form.first_name.errors %}<div class="text-danger small mt-1">{{ err }}</div>{% endfor %}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Soyad</label>
+                            {{ form.last_name }}
+                            {% for err in form.last_name.errors %}<div class="text-danger small mt-1">{{ err }}</div>{% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Kullanıcı Kodu</label>
+                        {{ form.user_code }}
+                        <div class="form-text small text-muted">Bu alan oluşturulduktan sonra değiştirilemez.</div>
+                        {% for err in form.user_code.errors %}<div class="text-danger small mt-1">{{ err }}</div>{% endfor %}
+                    </div>
+
+                    <div class="row g-3">
+                      <div class="col-md-6">
+                        <label class="form-label fw-bold text-dark">Rol / Görev</label>
+                        {{ form.role }}
+                        {% for err in form.role.errors %}<div class="text-danger small mt-1">{{ err }}</div>{% endfor %}
+                      </div>
+                      <div class="col-md-6">
+                        <label class="form-label fw-bold text-dark">Yetki</label>
+                        {{ form.authority }}
+                        {% for err in form.authority.errors %}<div class="text-danger small mt-1">{{ err }}</div>{% endfor %}
+                      </div>
+                    </div>
+
+                    <div class="mb-3 p-3 bg-light rounded border">
+                        <label class="form-label fw-bold text-danger"><i class="fas fa-key"></i> Şifre İşlemleri</label>
+                        <input type="password" name="new_password" class="form-control" placeholder="Yeni şifre belirlemek için buraya yazın...">
+                        <div class="form-text small">Şifreyi değiştirmek istemiyorsanız bu alanı boş bırakın.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Telefon</label>
+                        {{ form.phone }}
+                        {% for err in form.phone.errors %}<div class="text-danger small mt-1">{{ err }}</div>{% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">E-posta</label>
+                        {{ form.email }}
+                        {% for err in form.email.errors %}<div class="text-danger small mt-1">{{ err }}</div>{% endfor %}
+                    </div>
+
+                    <div class="form-check mb-3">
+                        {{ form.is_active }}
+                        <label class="form-check-label" for="activeCheck">
+                            Kullanıcı Aktif
+                        </label>
+                    </div>
+
+                    {% if user_field_defs %}
+                    <div class="card bg-light border-0 mb-3">
+                        <div class="card-body">
+                            <h6 class="text-info fw-bold mb-3"><i class="fas fa-magic"></i> Özel Bilgiler</h6>
+                            <div class="row">
+                                {% for uf_def in user_field_defs %}
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label fw-bold small text-muted">{{ uf_def.name }}</label>
+                                    <div class="tag-container-user" id="tagContainer_{{ uf_def.slug }}">
+                                        <input type="text" 
+                                               class="tag-input-user" 
+                                               id="tagInput_{{ uf_def.slug }}" 
+                                               placeholder="Ekle (Enter'a basın)..."
+                                               data-field-slug="{{ uf_def.slug }}"
+                                               onkeydown="handleUserTagInput(event, '{{ uf_def.slug }}')">
+                                    </div>
+                                    <input type="hidden" 
+                                           name="user_custom_{{ uf_def.slug }}" 
+                                           id="hiddenInput_{{ uf_def.slug }}" 
+                                           value="{% if user.extra_data and uf_def.slug in user.extra_data %}{{ user.extra_data|get_item:uf_def.slug }}{% endif %}">
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">Değişiklikleri Kaydet</button>
+                        <a href="{% url 'user_list' %}" class="btn btn-light">İptal</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Özel Alan Ekleme Modal -->
+<div class="modal fade" id="addUserFieldModal" tabindex="-1" aria-labelledby="addUserFieldModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title fw-bold" id="addUserFieldModalLabel">
+                    <i class="fas fa-magic me-2"></i>Yeni Özel Alan Ekle
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="{% url 'add_user_field' %}" method="post">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="alert alert-info border-0 mb-3">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Bilgi:</strong> Bu alan tüm mevcut kullanıcılarda ve yeni eklenen kullanıcılarda otomatik olarak görünecektir. Formlarda filtre olarak kullanılabilir.
+                    </div>
+                    <div class="mb-3">
+                        <label for="userFieldName" class="form-label fw-bold">Alan Adı</label>
+                        <input type="text" 
+                               class="form-control" 
+                               id="userFieldName" 
+                               name="name" 
+                               placeholder="Örn: Yetenek, Bölge, Departman" 
+                               required
+                               autofocus>
+                        <div class="form-text">Bu alan tüm kullanıcılarda telefon alanı gibi görünecektir.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                    <button type="submit" class="btn btn-info text-white fw-bold">
+                        <i class="fas fa-plus me-1"></i>Alanı Oluştur
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Rol kutusuna Bootstrap stili ekle
+    var roleSelect = document.querySelector('#id_role');
+    if (roleSelect) {
+        roleSelect.classList.add('form-select');
+    }
+
+    // Yetki kutusuna Bootstrap stili ekle
+    var authoritySelect = document.querySelector('#id_authority');
+    if (authoritySelect) {
+        authoritySelect.classList.add('form-select');
+    }
+
+    // user_code input'u varsa readonly gibi davranması için (backend de zaten kilitleyecek)
+    var userCodeInput = document.querySelector('#id_user_code');
+    if (userCodeInput) {
+        userCodeInput.classList.add('bg-light');
+    }
+
+    // Kullanıcı Özel Alan Tag Sistemi
+    const userTagData = {};
+    
+    // Sayfa yüklendiğinde mevcut tag'leri yükle
+    document.addEventListener('DOMContentLoaded', function() {
+        {% for uf_def in user_field_defs %}
+        const fieldSlug_{{ forloop.counter0 }} = '{{ uf_def.slug }}';
+        const hiddenInput_{{ forloop.counter0 }} = document.getElementById('hiddenInput_' + fieldSlug_{{ forloop.counter0 }});
+        if (hiddenInput_{{ forloop.counter0 }}) {
+            const currentValue = hiddenInput_{{ forloop.counter0 }}.value || '';
+            userTagData[fieldSlug_{{ forloop.counter0 }}] = currentValue ? currentValue.split(',').map(t => t.trim()).filter(t => t) : [];
+            renderUserTags(fieldSlug_{{ forloop.counter0 }});
+        }
+        {% endfor %}
+    });
+
+    function handleUserTagInput(event, fieldSlug) {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            const input = event.target;
+            const value = input.value.trim();
+            
+            if (!userTagData[fieldSlug]) {
+                userTagData[fieldSlug] = [];
+            }
+            
+            if (value && !userTagData[fieldSlug].includes(value)) {
+                userTagData[fieldSlug].push(value);
+                renderUserTags(fieldSlug);
+                input.value = '';
+            }
+        }
+    }
+
+    function renderUserTags(fieldSlug) {
+        const container = document.getElementById('tagContainer_' + fieldSlug);
+        const hiddenInput = document.getElementById('hiddenInput_' + fieldSlug);
+        const input = document.getElementById('tagInput_' + fieldSlug);
+        
+        if (!container || !hiddenInput) return;
+        
+        // Mevcut tag'leri temizle (input hariç)
+        const existingTags = container.querySelectorAll('.tag-badge');
+        existingTags.forEach(tag => tag.remove());
+        
+        // Tag'leri render et
+        if (userTagData[fieldSlug] && userTagData[fieldSlug].length > 0) {
+            userTagData[fieldSlug].forEach((tag) => {
+                const badge = document.createElement('div');
+                badge.className = 'tag-badge bg-info text-white';
+                badge.innerHTML = `${tag} <span class="tag-close" onclick="removeUserTag('${fieldSlug}', '${tag}')">&times;</span>`;
+                container.insertBefore(badge, input);
+            });
+        }
+        
+        // Hidden input'u güncelle
+        hiddenInput.value = userTagData[fieldSlug] ? userTagData[fieldSlug].join(',') : '';
+    }
+
+    function removeUserTag(fieldSlug, tagToRemove) {
+        if (userTagData[fieldSlug]) {
+            userTagData[fieldSlug] = userTagData[fieldSlug].filter(t => t !== tagToRemove);
+            renderUserTags(fieldSlug);
+        }
+    }
+</script>
+
+<style>
+    .tag-container-user {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        padding: 8px;
+        border: 1px solid #ced4da;
+        border-radius: 0.375rem;
+        background-color: #fff;
+        min-height: 40px;
+    }
+    
+    .tag-badge {
+        background-color: #0dcaf0;
+        color: white;
+        padding: 5px 10px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+    }
+    
+    .tag-close {
+        cursor: pointer;
+        font-weight: bold;
+        font-size: 1.1rem;
+        line-height: 1;
+        margin-left: 5px;
+    }
+    
+    .tag-close:hover {
+        opacity: 0.8;
+    }
+    
+    .tag-input-user {
+        border: none;
+        outline: none;
+        flex-grow: 1;
+        padding: 5px;
+        min-width: 150px;
+        background: transparent;
+    }
+</style>
+{% endblock %}

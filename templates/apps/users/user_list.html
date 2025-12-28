@@ -1,0 +1,143 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Kullanıcı Listesi</h2>
+    
+    <div class="d-flex gap-2">
+        <a href="{% url 'export_users' %}" class="btn btn-success shadow" title="Excel İndir">
+            <i class="fas fa-file-excel"></i> İndir
+        </a>
+        <button type="button" class="btn btn-outline-success shadow" data-bs-toggle="modal" data-bs-target="#importModal" title="Excel Yükle">
+            <i class="fas fa-file-upload"></i> Yükle
+        </button>
+        <a href="{% url 'add_user' %}" class="btn btn-danger rounded-circle shadow" style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
+            <i class="fas fa-plus"></i>
+        </a>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-4" style="background-color: #fff;">
+    <div class="card-body">
+        <form method="get" class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label text-muted small fw-bold">ARAMA</label>
+                <div class="input-group">
+                    <span class="input-group-text bg-light border-end-0"><i class="fas fa-search text-secondary"></i></span>
+                    <input type="text" name="search" class="form-control border-start-0 ps-0 bg-light" placeholder="Ad, Soyad veya Kod..." value="{{ search_query }}">
+                </div>
+            </div>
+
+            <div class="col-md-3">
+                 <label class="form-label text-muted small fw-bold">ROL FİLTRESİ</label>
+                 <select name="role" class="form-select bg-light">
+                     <option value="">Tümü</option>
+        
+        {% for r in roles %}
+            <option value="{{ r.id }}" {% if role_filter == r.id %}selected{% endif %}>
+                {{ r.name }}
+            </option>
+        {% endfor %}
+        
+    </select>
+</div>
+
+            <div class="col-md-3">
+                <div class="form-check form-switch pt-4">
+                    <input class="form-check-input" type="checkbox" name="show_passive" value="true" id="passiveSwitch" {% if show_passive %}checked{% endif %}>
+                    <label class="form-check-label" for="passiveSwitch">Pasifleri Göster</label>
+                </div>
+            </div>
+
+            <div class="col-md-2 d-grid">
+                <button type="submit" class="btn btn-dark">Filtrele</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0" style="vertical-align: middle;">
+            <thead class="table-light">
+                <tr>
+                    <th>Kod</th>
+                    <th>Ad Soyad</th>
+                    <th>Telefon</th>
+                    <th>Yetki</th>
+                    <th>Rol</th>
+                    <th>Durum</th>
+                    <th class="text-end">İşlemler</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                <tr class="{% if not u.is_active %}table-secondary text-muted{% endif %}">
+                    <td><strong>{{ u.user_code }}</strong></td>
+                    <td>{{ u.first_name }} {{ u.last_name }}</td>
+                    <td>{{ u.phone|default:"-" }}</td>
+                    <td><span class="badge bg-dark">{{ u.authority }}</span></td>
+                    <td>
+                        {% if u.role %}
+                            <span class="badge bg-primary">{{ u.role.name }}</span>
+                        {% else %}
+                            <span class="badge bg-secondary">Rol Yok</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if u.is_active %}
+                            <span class="badge bg-success">Aktif</span>
+                        {% else %}
+                            <span class="badge bg-secondary">Pasif</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-end">
+                        {% if u.is_active %}
+                            <a href="{% url 'toggle_user_status' u.pk %}" class="btn btn-sm btn-outline-warning" onclick="return confirm('Pasife almak istiyor musunuz?');"><i class="fas fa-ban"></i></a>
+                        {% else %}
+                            <a href="{% url 'toggle_user_status' u.pk %}" class="btn btn-sm btn-outline-success"><i class="fas fa-check"></i></a>
+                        {% endif %}
+                        <a href="{% url 'edit_user' u.pk %}" class="btn btn-sm btn-outline-primary"><i class="fas fa-edit"></i></a>
+                        <a href="{% url 'delete_user' u.pk %}" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7" class="text-center py-4">Kayıt bulunamadı.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div id="loadingOverlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; flex-direction:column; justify-content:center; align-items:center; color:white; backdrop-filter: blur(5px);">
+    <div class="spinner-border text-warning" style="width: 4rem; height: 4rem;" role="status"></div>
+    <h4 class="mt-4 fw-bold">Personeller Sisteme İşleniyor...</h4>
+    <p class="text-white-50">Lütfen bekleyiniz.</p>
+</div>
+
+<div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title">Personel Yükle</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="{% url 'import_users' %}" method="post" enctype="multipart/form-data" onsubmit="document.getElementById('loadingOverlay').style.display='flex'">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="alert alert-light border mb-3">
+                        <a href="{% url 'download_template' 'user' %}" class="btn btn-outline-primary btn-sm w-100">
+                            <i class="fas fa-download"></i> Örnek Personel Şablonunu İndir
+                        </a>
+                    </div>
+                    <label class="form-label fw-bold">Excel Dosyası</label>
+                    <input type="file" name="excel_file" class="form-control" required accept=".xlsx">
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-success w-100">Yükle</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

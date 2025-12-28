@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Kullanıcı Listesi</h2>
+    <a href="{% url 'add_user' %}" class="btn btn-danger btn-lg rounded-circle shadow">
+        <i class="fas fa-plus"></i>
+    </a>
+</div>
+
+<div class="card shadow-sm border-0">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0" style="vertical-align: middle;">
+            <thead class="table-light">
+                <tr>
+                    <th>Kod</th>
+                    <th>Ad Soyad</th>
+                    <th>Telefon</th>
+                    <th>E-posta</th>
+                    <th>Durum</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td><strong>{{ user.user_code }}</strong></td>
+                    <td>{{ user.first_name }} {{ user.last_name }}</td>
+                    <td>{{ user.phone|default:"-" }}</td>
+                    <td>{{ user.email|default:"-" }}</td>
+                    <td>
+                        <span class="badge bg-success">Aktif</span>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

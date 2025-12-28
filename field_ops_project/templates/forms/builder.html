@@ -1,0 +1,546 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css" rel="stylesheet" />
+
+<style>
+    .question-row { cursor: pointer; transition: all 0.2s ease; border-left: 4px solid transparent; }
+    .question-row:hover { background-color: #f8f9fa; border-left: 4px solid #ffc107; transform: translateX(3px); }
+    .child-question-item { transition: all 0.2s ease; }
+    .child-question-item:hover { background-color: #e9ecef !important; transform: translateX(5px); }
+    .nav-tabs .nav-link.active { color: #0d6efd; border-bottom: 3px solid #0d6efd; background: none; }
+    .nav-tabs .nav-link { color: #495057; font-weight: 600; }
+    
+    /* BAŞLIKLAR */
+    .filter-section-title { 
+        font-size: 0.8rem; 
+        font-weight: 800; 
+        text-transform: uppercase; 
+        color: #adb5bd; 
+        margin-bottom: 8px; 
+        display: block; 
+        letter-spacing: 0.5px;
+    }
+    /* Select2 Ayarı */
+    .select2-container--bootstrap-5 .select2-selection { border-color: #dee2e6; }
+</style>
+
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h4 class="fw-bold mb-1"><i class="fas fa-clipboard-list me-2 text-primary"></i>{{ survey.title }}</h4>
+            <span class="text-muted small">
+                {% if survey.is_active %}<span class="badge bg-success">YAYINDA</span>{% else %}<span class="badge bg-secondary">PASİF</span>{% endif %}
+            </span>
+        </div>
+        <a href="{% url 'survey_list' %}" class="btn btn-outline-secondary btn-sm"><i class="fas fa-arrow-left"></i> Listeye Dön</a>
+    </div>
+
+    <ul class="nav nav-tabs mb-4" id="myTab" role="tablist">
+        <li class="nav-item"><button class="nav-link active" id="questions-tab" data-bs-toggle="tab" data-bs-target="#questions" type="button">Sorular</button></li>
+        <li class="nav-item"><button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button">Filtreler & Ayarlar</button></li>
+    </ul>
+
+    <div class="tab-content" id="myTabContent">
+        
+        <div class="tab-pane fade show active" id="questions">
+            <div class="row">
+                <div class="col-md-4 mb-4">
+                    <div class="card shadow border-0 border-top border-4 border-success">
+                        <div class="card-header bg-white fw-bold"><i class="fas fa-plus-circle me-2 text-success"></i> Hızlı Soru Ekle</div>
+                        <div class="card-body">
+                            <form action="{% url 'question_create' survey.id %}" method="post">
+                                {% csrf_token %}
+                                <div class="mb-3"><label class="fw-bold small">Soru Metni</label><input type="text" name="label" class="form-control" required placeholder="Örn: Reyon fotoğrafı"></div>
+                                <div class="mb-3"><label class="fw-bold small">Tip</label>
+                                    <select name="input_type" class="form-select" id="inputTypeSelect" onchange="toggleFields()">
+                                        <option value="text">Kısa Yazı</option><option value="textarea">Uzun Not</option><option value="select">Seçmeli</option><option value="photo">Fotoğraf</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3 bg-light p-2 rounded border" id="optionsArea" style="display:none;">
+                                    <label class="small fw-bold">Seçenekler</label><div class="tag-container" id="tagContainer"><input type="text" class="tag-input" id="tagInput" placeholder="Ekle..."></div><input type="hidden" name="options_hidden_input" id="hiddenOptions">
+                                </div>
+                                <div class="mb-3 bg-light p-2 rounded border" id="photoLimitsArea" style="display:none;">
+                                    <label class="small fw-bold">Limitler</label><div class="row g-2"><div class="col-6"><input type="number" name="min_photos" class="form-control" value="1" placeholder="Min"></div><div class="col-6"><input type="number" name="max_photos" class="form-control" value="3" placeholder="Max"></div></div>
+                                </div>
+                                <div class="mb-3 bg-light p-2 rounded border">
+                                    <label class="small fw-bold text-danger">🔗 Bağlantı</label>
+                                    <select name="parent_question" id="new_parent_select" class="form-select mb-2" onchange="loadTriggerOptions(this.value, 'new_trigger_select')">
+                                        <option value="">-- Yok --</option>{% for q in questions %}{% if q.input_type == 'select' %}<option value="{{ q.id }}">{{ forloop.counter }}. {{ q.label }}</option>{% endif %}{% endfor %}
+                                    </select>
+                                    <select name="trigger_answer" id="new_trigger_select" class="form-select" disabled><option value="">Önce soru seçin...</option></select>
+                                </div>
+                                <div class="form-check form-switch mb-3"><input class="form-check-input" type="checkbox" name="required" id="reqCheck" checked><label class="form-check-label">Zorunlu</label></div>
+                                <button type="submit" class="btn btn-success w-100 fw-bold">Kaydet</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-8">
+                    {% if questions_data %}
+                    <div class="list-group shadow-sm">
+                        {% for item in questions_data %}
+                        {% with q=item.question %}
+                        <div class="list-group-item p-3 question-row" data-id="{{ q.id }}" data-label="{{ q.label }}" data-type="{{ q.input_type }}" data-required="{{ q.required|yesno:'true,false' }}" data-min="{{ q.min_photos|default:'1' }}" data-max="{{ q.max_photos|default:'1' }}" data-options="{% for o in q.options.all %}{{ o.text|escapejs }}{% if not forloop.last %},{% endif %}{% endfor %}" data-parent="{{ q.parent_question.id|default:'' }}" data-trigger="{{ q.trigger_answer|default:'' }}" onclick="window.openEditModal(this)">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div class="flex-grow-1">
+                                    <h6 class="fw-bold mb-1">
+                                        <span class="badge bg-secondary me-2">{{ forloop.counter }}</span>
+                                        {{ q.label }}
+                                    </h6>
+                                    <small class="text-muted">{{ q.get_input_type_display }}</small>
+                                    
+                                    {% if item.options %}
+                                    <div class="mt-2">
+                                        <small class="text-muted fw-bold">Seçenekler:</small>
+                                        <div class="d-flex flex-wrap gap-1 mt-1">
+                                            {% for opt in item.options %}
+                                            <span class="badge bg-info text-dark">{{ opt }}</span>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                                <a href="{% url 'question_delete' q.id %}" class="btn btn-outline-danger btn-sm border-0 ms-2" onclick="event.stopPropagation(); return confirm('Sil?')"><i class="fas fa-trash-alt"></i></a>
+                            </div>
+                            
+                            {% if item.child_questions %}
+                            <div class="mt-3 pt-3 border-top">
+                                <small class="text-muted fw-bold d-block mb-2">
+                                    <i class="fas fa-link me-1"></i> Bu Soruya Bağlı Alt Sorular:
+                                </small>
+                                <div class="ps-3">
+                                    {% for child in item.child_questions %}
+                                    <div class="mb-2 p-2 bg-light rounded border-start border-3 border-primary child-question-item">
+                                        <div class="d-flex justify-content-between align-items-start">
+                                            <div class="flex-grow-1">
+                                                <div class="d-flex align-items-center gap-2 mb-1">
+                                                    <small class="fw-bold text-dark">{{ child.label }}</small>
+                                                    <span class="badge bg-primary">{{ child.input_type }}</span>
+                                                </div>
+                                                {% if child.trigger_answer %}
+                                                <div class="mt-1 mb-1">
+                                                    <span class="badge bg-warning text-dark">
+                                                        <i class="fas fa-link me-1"></i>
+                                                        <strong>{{ child.trigger_answer }}</strong> cevabına bağlı
+                                                    </span>
+                                                </div>
+                                                {% endif %}
+                                                {% if child.options %}
+                                                <div class="mt-1">
+                                                    <small class="text-muted fw-bold d-block mb-1">Seçenekler:</small>
+                                                    <div class="d-flex flex-wrap gap-1">
+                                                        {% for opt in child.options %}
+                                                        <span class="badge bg-secondary">{{ opt }}</span>
+                                                        {% endfor %}
+                                                    </div>
+                                                </div>
+                                                {% endif %}
+                                            </div>
+                                            <a href="{% url 'question_delete' child.id %}" class="btn btn-outline-danger btn-sm border-0 ms-2" onclick="event.stopPropagation(); return confirm('Alt soruyu sil?')" title="Sil">
+                                                <i class="fas fa-trash-alt"></i>
+                                            </a>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endwith %}
+                        {% endfor %}
+                    </div>
+                    {% else %}<div class="alert alert-light text-center border p-5">Soru yok.</div>{% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="settings">
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="save_settings">
+                
+                <div class="row g-4">
+                    
+                    <div class="col-md-3">
+                        <div class="card shadow-sm h-100 border-0 border-top border-4 border-warning">
+                            <div class="card-header bg-white fw-bold text-secondary"><i class="fas fa-cog me-2"></i> GENEL AYARLAR</div>
+                            <div class="card-body">
+                                
+                                <span class="filter-section-title">ANKET DURUMU</span>
+                                <div class="form-check form-switch mb-4">
+                                    <input class="form-check-input" type="checkbox" name="is_active" id="activeSwitch" {% if survey.is_active %}checked{% endif %}>
+                                    <label class="form-check-label fw-bold" for="activeSwitch">Aktif / Yayında</label>
+                                </div>
+
+                                <span class="filter-section-title">GEÇERLİLİK TARİHLERİ</span>
+                                <div class="row g-2 mb-3">
+                                    <div class="col-12 mb-2">
+                                        <label class="small text-muted fw-bold">Başlangıç</label>
+                                        <input type="date" name="start_date" class="form-control form-control-sm" value="{{ survey.start_date|date:'Y-m-d' }}">
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="small text-muted fw-bold">Bitiş</label>
+                                        <input type="date" name="end_date" class="form-control form-control-sm" value="{{ survey.end_date|date:'Y-m-d' }}">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-3">
+                        <div class="card shadow-sm h-100 border-0 border-top border-4 border-success">
+                            <div class="card-header bg-white fw-bold text-success"><i class="fas fa-users me-2"></i> KULLANICI FİLTRELERİ</div>
+                            <div class="card-body">
+                                
+                                <div class="mb-4">
+                                    <label class="fw-bold text-dark d-block mb-1">Kullanıcı Adı</label>
+                                    <select class="form-select select2-multiple" name="filter_users" multiple="multiple" style="width: 100%">
+                                        {% for user in all_users %}
+                                            <option value="{{ user.id }}" {% if user.id in selected_users %}selected{% endif %}>
+                                                {{ user.first_name }} {{ user.last_name }} ({{ user.user_code }})
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                    <small class="text-muted d-block mt-1">Birden fazla kullanıcı seçebilirsiniz.</small>
+                                </div>
+
+                                <div class="mb-4">
+                                    <label class="fw-bold text-dark d-block mb-1">Rol Filtresi</label>
+                                    <div class="border rounded p-2 bg-light" style="max-height: 200px; overflow-y: auto;">
+                                        {% for role in all_roles %}
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="target_roles" value="{{ role.id }}" id="role_{{ role.id }}" {% if role.id in selected_roles %}checked{% endif %}>
+                                                <label class="form-check-label small" for="role_{{ role.id }}">{{ role.name }}</label>
+                                            </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+
+                                <hr class="my-3 border-secondary opacity-25">
+
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <label class="fw-bold text-primary">Kullanıcı Özel Alan</label>
+                                    <button type="button" class="btn btn-sm btn-primary rounded-circle shadow-sm" onclick="addUserFilterRow()">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                </div>
+                                <div id="userFiltersContainer">
+                                    {% if survey.user_custom_filters %}
+                                        {% for key, values in survey.user_custom_filters.items %}
+                                            <div class="mb-3 p-2 border rounded user-filter-row" data-row-index="{{ forloop.counter0 }}">
+                                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                                    <select name="user_filter_key_{{ forloop.counter0 }}" class="form-select form-select-sm bg-light fw-bold" style="max-width: 50%;" onchange="updateUserFilterValues(this)">
+                                                        <option value="">-- Özel Alan Seçin --</option>
+                                                        {% for field in user_fields %}
+                                                            <option value="{{ field.key }}" {% if field.key == key %}selected{% endif %}>{{ field.label }}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.parentElement.parentElement.remove()">
+                                                        <i class="fas fa-times"></i>
+                                                    </button>
+                                                </div>
+                                                <select name="user_filter_value_{{ forloop.counter0 }}[]" class="form-select form-select-sm select2-multiple-user-filter" multiple="multiple" style="width: 100%;">
+                                                    {% for field in user_fields %}
+                                                        {% if field.key == key %}
+                                                            {% for opt in field.options %}
+                                                                <option value="{{ opt }}" {% if opt in values %}selected{% endif %}>{{ opt }}</option>
+                                                            {% endfor %}
+                                                        {% endif %}
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                        {% endfor %}
+                                    {% endif %}
+                                </div>
+                                <small class="text-muted" style="font-size: 0.75rem;">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    Kullanıcılarda açılan özel alanlar otomatik gelir.
+                                </small>
+
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-3">
+                        <div class="card shadow-sm h-100 border-0 border-top border-4 border-info">
+                            <div class="card-header bg-white fw-bold text-info"><i class="fas fa-store me-2"></i> MÜŞTERİ FİLTRELERİ</div>
+                            <div class="card-body">
+                                
+                                <div class="mb-4">
+                                    <label class="fw-bold text-dark d-block mb-1">Müşteri Filtresi (Firma)</label>
+                                    <select class="form-select select2-multiple" name="filter_customers" multiple="multiple" style="width: 100%">
+                                        {% for customer in all_customers %}
+                                            <option value="{{ customer.id }}" {% if customer.id in selected_customers %}selected{% endif %}>{{ customer.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <small class="text-muted d-block mt-1">Sistemdeki ana müşterilerden seçin.</small>
+                                </div>
+
+                                <div class="mb-4">
+                                    <label class="fw-bold text-dark d-block mb-1">Cari Filtresi (Cari/Şube)</label>
+                                    <select class="form-select select2-multiple" name="filter_caris" multiple="multiple" style="width: 100%">
+                                        {% for cari in all_caris %}
+                                            <option value="{{ cari.id }}" {% if cari.id in selected_caris %}selected{% endif %}>{{ cari.cari_adi }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <small class="text-muted d-block mt-1">Müşterilere bağlı carilerden seçin.</small>
+                                </div>
+
+                                <hr class="my-4 border-secondary opacity-25">
+
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <label class="fw-bold text-primary">Müşteri Özel Alan</label>
+                                    <button type="button" class="btn btn-sm btn-primary rounded-circle shadow-sm" onclick="addCustomFilterRow()">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                </div>
+                                <div id="customFiltersContainer">
+                                    {% if survey.custom_filters %}
+                                        {% for key, values in survey.custom_filters.items %}
+                                            <div class="mb-3 p-2 border rounded custom-filter-row" data-row-index="{{ forloop.counter0 }}">
+                                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                                    <select name="custom_filter_key_{{ forloop.counter0 }}" class="form-select form-select-sm bg-light fw-bold" style="max-width: 50%;" onchange="updateFilterValues(this)">
+                                                        <option value="">-- Özel Alan Seçin --</option>
+                                                        {% for field in customer_fields %}
+                                                            <option value="{{ field.key }}" {% if field.key == key %}selected{% endif %}>{{ field.label }}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.parentElement.parentElement.remove()">
+                                                        <i class="fas fa-times"></i> Kaldır
+                                                    </button>
+                                                </div>
+                                                <select name="custom_filter_value_{{ forloop.counter0 }}[]" class="form-select form-select-sm select2-multiple-filter" multiple="multiple" style="width: 100%;">
+                                                    {% for field in customer_fields %}
+                                                        {% if field.key == key %}
+                                                            {% for opt in field.options %}
+                                                                <option value="{{ opt }}" {% if opt in values %}selected{% endif %}>{{ opt }}</option>
+                                                            {% endfor %}
+                                                        {% endif %}
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                        {% endfor %}
+                                    {% endif %}
+                                </div>
+                                <small class="text-muted" style="font-size: 0.75rem;">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    Müşteriler modülünde açılan özel alanlar (Örn: Stant Tipi) ve bu alanlarda kullanılan değerler otomatik gelir. Birden fazla değer seçebilirsiniz.
+                                </small>
+
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-3">
+                        <div class="card shadow-sm h-100 border-0 border-top border-4 border-danger">
+                            <div class="card-header bg-white fw-bold text-danger"><i class="fas fa-box-open me-2"></i> ÜRÜN FİLTRELERİ</div>
+                            <div class="card-body">
+                                <div class="alert alert-light border text-center py-5">
+                                    <i class="fas fa-tools fa-2x text-muted mb-3"></i>
+                                    <h6 class="text-muted">Geliştirme Aşamasında</h6>
+                                    <small>Ürün kategorisi ve SKU bazlı filtreleme modülü yakında eklenecektir.</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="row mt-4 mb-5">
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-primary btn-lg w-100 fw-bold shadow">
+                            <i class="fas fa-save me-2"></i> TÜM AYARLARI VE FİLTRELERİ KAYDET
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="editQuestionModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><form method="post" id="editQuestionForm">{% csrf_token %}<div class="modal-header bg-warning"><h5 class="modal-title fw-bold text-dark">Düzenle</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="mb-3"><label class="fw-bold">Soru</label><input type="text" name="label" id="edit_label" class="form-control" required></div><div class="mb-3 bg-light p-2 rounded border" id="edit_optionsArea" style="display:none;"><div class="tag-container" id="edit_tagContainer"><input type="text" class="tag-input" id="edit_tagInput"></div><input type="hidden" name="options_hidden_input_edit" id="edit_hiddenOptions"></div><div class="mb-3 bg-light p-2 rounded border" id="edit_photoLimitsArea" style="display:none;"><div class="row g-2"><div class="col-6"><input type="number" name="min_photos" id="edit_min" class="form-control"></div><div class="col-6"><input type="number" name="max_photos" id="edit_max" class="form-control"></div></div></div><div class="mb-3 bg-light p-2 rounded border"><select name="parent_question" id="edit_parent" class="form-select mb-2" onchange="loadTriggerOptions(this.value, 'edit_trigger')"></select><select name="trigger_answer" id="edit_trigger" class="form-select" disabled></select></div><div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="required" id="edit_required"><label>Zorunlu</label></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button><button type="submit" class="btn btn-warning fw-bold">Kaydet</button></div></form></div></div></div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+{{ customer_fields|json_script:"customer-fields-data" }}
+{{ user_fields|json_script:"user-fields-data" }}
+
+<script>
+    const availableFields = JSON.parse(document.getElementById('customer-fields-data').textContent || '[]');
+    const availableUserFields = JSON.parse(document.getElementById('user-fields-data').textContent || '[]');
+
+    $(document).ready(function() {
+        $('.select2-multiple').select2({
+            theme: 'bootstrap-5',
+            placeholder: "Seçim yapmak için tıklayın...",
+            allowClear: true,
+            width: '100%'
+        });
+        
+        // Müşteri özel alan filtreleri için select2
+        $('.select2-multiple-filter').select2({
+            theme: 'bootstrap-5',
+            placeholder: "Değer seçin (birden fazla seçebilirsiniz)...",
+            allowClear: true,
+            width: '100%'
+        });
+        
+        // Kullanıcı özel alan filtreleri için select2
+        $('.select2-multiple-user-filter').select2({
+            theme: 'bootstrap-5',
+            placeholder: "Değer seçin (birden fazla seçebilirsiniz)...",
+            allowClear: true,
+            width: '100%'
+        });
+    });
+
+    function addCustomFilterRow() {
+        if (availableFields.length === 0) {
+            alert("Müşteri modülünde tanımlı özel alan bulunamadı. Önce Müşteriler modülünde özel alan ekleyiniz.");
+            return;
+        }
+        
+        // Mevcut satır sayısını bul
+        let currentRowCount = $('#customFiltersContainer .custom-filter-row').length;
+        let rowIndex = currentRowCount;
+        
+        let optionsHtml = '<option value="">-- Özel Alan Seçin --</option>' + 
+                          availableFields.map(f => `<option value="${f.key}">${f.label}</option>`).join('');
+        
+        let rowHtml = `
+            <div class="mb-3 p-2 border rounded custom-filter-row" data-row-index="${rowIndex}">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <select name="custom_filter_key_${rowIndex}" class="form-select form-select-sm bg-light fw-bold" style="max-width: 50%;" onchange="updateFilterValues(this)">
+                        ${optionsHtml}
+                    </select>
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.parentElement.parentElement.remove()">
+                        <i class="fas fa-times"></i> Kaldır
+                    </button>
+                </div>
+                <select name="custom_filter_value_${rowIndex}[]" class="form-select form-select-sm select2-multiple-filter" multiple="multiple" style="width: 100%;" disabled>
+                    <option value="">Önce özel alan seçin</option>
+                </select>
+            </div>
+        `;
+        $('#customFiltersContainer').append(rowHtml);
+        
+        // Yeni eklenen select2'yi initialize et
+        $('.select2-multiple-filter').last().select2({
+            theme: 'bootstrap-5',
+            placeholder: "Değer seçin (birden fazla seçebilirsiniz)...",
+            allowClear: true,
+            width: '100%'
+        });
+    }
+
+    function updateFilterValues(selectElement) {
+        let selectedKey = selectElement.value;
+        let rowElement = $(selectElement).closest('.custom-filter-row');
+        let valueSelect = rowElement.find('.select2-multiple-filter');
+        let fieldData = availableFields.find(f => f.key === selectedKey);
+        
+        if (fieldData && fieldData.options.length > 0) {
+            let newOpts = fieldData.options.map(o => `<option value="${o}">${o}</option>`).join('');
+            valueSelect.html(newOpts).prop('disabled', false);
+            
+            // Select2'yi yeniden initialize et
+            valueSelect.select2('destroy');
+            valueSelect.select2({
+                theme: 'bootstrap-5',
+                placeholder: "Değer seçin (birden fazla seçebilirsiniz)...",
+                allowClear: true,
+                width: '100%'
+            });
+        } else {
+            valueSelect.html('<option value="">Bu alan için değer bulunamadı</option>').prop('disabled', true);
+            valueSelect.select2('destroy');
+            valueSelect.select2({
+                theme: 'bootstrap-5',
+                placeholder: "Değer bulunamadı",
+                allowClear: true,
+                width: '100%'
+            });
+        }
+    }
+
+    // Kullanıcı Özel Alan Filtreleri
+    function addUserFilterRow() {
+        if (availableUserFields.length === 0) {
+            alert("Kullanıcı modülünde tanımlı özel alan bulunamadı. Önce Kullanıcılar modülünde özel alan ekleyiniz.");
+            return;
+        }
+        
+        let currentRowCount = $('#userFiltersContainer .user-filter-row').length;
+        let rowIndex = currentRowCount;
+        
+        let optionsHtml = '<option value="">-- Özel Alan Seçin --</option>' + 
+                          availableUserFields.map(f => `<option value="${f.key}">${f.label}</option>`).join('');
+        
+        let rowHtml = `
+            <div class="mb-3 p-2 border rounded user-filter-row" data-row-index="${rowIndex}">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <select name="user_filter_key_${rowIndex}" class="form-select form-select-sm bg-light fw-bold" style="max-width: 50%;" onchange="updateUserFilterValues(this)">
+                        ${optionsHtml}
+                    </select>
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.parentElement.parentElement.remove()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <select name="user_filter_value_${rowIndex}[]" class="form-select form-select-sm select2-multiple-user-filter" multiple="multiple" style="width: 100%;" disabled>
+                    <option value="">Önce özel alan seçin</option>
+                </select>
+            </div>
+        `;
+        $('#userFiltersContainer').append(rowHtml);
+        
+        $('.select2-multiple-user-filter').last().select2({
+            theme: 'bootstrap-5',
+            placeholder: "Değer seçin (birden fazla seçebilirsiniz)...",
+            allowClear: true,
+            width: '100%'
+        });
+    }
+
+    function updateUserFilterValues(selectElement) {
+        let selectedKey = selectElement.value;
+        let rowElement = $(selectElement).closest('.user-filter-row');
+        let valueSelect = rowElement.find('.select2-multiple-user-filter');
+        let fieldData = availableUserFields.find(f => f.key === selectedKey);
+        
+        if (fieldData && fieldData.options.length > 0) {
+            let newOpts = fieldData.options.map(o => `<option value="${o}">${o}</option>`).join('');
+            valueSelect.html(newOpts).prop('disabled', false);
+            
+            valueSelect.select2('destroy');
+            valueSelect.select2({
+                theme: 'bootstrap-5',
+                placeholder: "Değer seçin (birden fazla seçebilirsiniz)...",
+                allowClear: true,
+                width: '100%'
+            });
+        } else {
+            valueSelect.html('<option value="">Bu alan için değer bulunamadı</option>').prop('disabled', true);
+            valueSelect.select2('destroy');
+            valueSelect.select2({
+                theme: 'bootstrap-5',
+                placeholder: "Değer bulunamadı",
+                allowClear: true,
+                width: '100%'
+            });
+        }
+    }
+
+    // --- ESKİ JS FONKSİYONLARI ---
+    function toggleFields() { const val = document.getElementById('inputTypeSelect').value; document.getElementById('optionsArea').style.display = (val === 'select') ? 'block' : 'none'; document.getElementById('photoLimitsArea').style.display = (val === 'photo') ? 'block' : 'none'; }
+    const tagContainer = document.getElementById('tagContainer'); const tagInput = document.getElementById('tagInput'); const hiddenInput = document.getElementById('hiddenOptions'); let tags = []; if(tagInput){ tagInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); const val = tagInput.value.trim(); if (val && !tags.includes(val)) { tags.push(val); renderTags(); tagInput.value = ''; }}}); } function renderTags() { tagContainer.querySelectorAll('.tag-badge').forEach(e => e.remove()); tags.forEach((tag, i) => { const b = document.createElement('div'); b.className = 'tag-badge'; b.innerHTML = `${tag} <span class="tag-close" onclick="removeTag(${i})">&times;</span>`; tagContainer.insertBefore(b, tagInput); }); hiddenInput.value = tags.join(','); } window.removeEditTag = (i) => { tags.splice(i, 1); renderEditTags(); }
+    let editTags = []; window.openEditModal = function(rowDiv) { const id = rowDiv.getAttribute('data-id'); const type = rowDiv.getAttribute('data-type'); const opts = rowDiv.getAttribute('data-options'); document.getElementById('editQuestionForm').action = `/forms/question/edit/${id}/`; document.getElementById('edit_label').value = rowDiv.getAttribute('data-label'); document.getElementById('edit_required').checked = (rowDiv.getAttribute('data-required') === 'true'); document.getElementById('edit_min').value = rowDiv.getAttribute('data-min'); document.getElementById('edit_max').value = rowDiv.getAttribute('data-max'); const parentId = rowDiv.getAttribute('data-parent'); const triggerVal = rowDiv.getAttribute('data-trigger'); document.getElementById('edit_parent').value = parentId; loadTriggerOptions(parentId, 'edit_trigger', triggerVal); document.getElementById('edit_optionsArea').style.display = (type === 'select') ? 'block' : 'none'; document.getElementById('edit_photoLimitsArea').style.display = (type === 'photo') ? 'block' : 'none'; if (type === 'select') { editTags = opts ? opts.split(',') : []; renderEditTags(); } new bootstrap.Modal(document.getElementById('editQuestionModal')).show(); }
+    const editTagInput = document.getElementById('edit_tagInput'); const editTagContainer = document.getElementById('edit_tagContainer'); const editHiddenInput = document.getElementById('edit_hiddenOptions'); if(editTagInput){ editTagInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); const val = editTagInput.value.trim(); if (val && !editTags.includes(val)) { editTags.push(val); renderEditTags(); editTagInput.value = ''; }}}); } function renderEditTags() { editTagContainer.querySelectorAll('.tag-badge').forEach(e => e.remove()); editTags.forEach((tag, i) => { const b = document.createElement('div'); b.className = 'tag-badge bg-warning text-dark'; b.innerHTML = `${tag} <span class="tag-close" onclick="removeEditTag(${i})">&times;</span>`; editTagContainer.insertBefore(b, editTagInput); }); editHiddenInput.value = editTags.join(','); } window.removeEditTag = (i) => { editTags.splice(i, 1); renderEditTags(); }
+    function loadTriggerOptions(questionId, targetSelectId, selectedValue = null) { const targetSelect = document.getElementById(targetSelectId); if (!questionId) { targetSelect.innerHTML = '<option value="">-- Yok --</option>'; targetSelect.disabled = true; return; } targetSelect.disabled = true; targetSelect.innerHTML = '<option>Yükleniyor...</option>'; fetch(`/forms/api/question-options/${questionId}/`).then(response => response.json()).then(data => { let html = '<option value="">-- Seçiniz --</option>'; data.options.forEach(opt => { const isSelected = (opt.text === selectedValue) ? 'selected' : ''; html += `<option value="${opt.text}" ${isSelected}>${opt.text}</option>`; }); targetSelect.innerHTML = html; targetSelect.disabled = false; }); }
+</script>
+<style>
+    /* Tag Style */ .tag-container { display: flex; flex-wrap: wrap; gap: 5px; padding: 5px; border: 1px solid #ced4da; border-radius: 0.375rem; background-color: #fff; } .tag-badge { background-color: #0d6efd; color: white; padding: 5px 10px; border-radius: 20px; font-size: 0.9rem; display: flex; align-items: center; } .tag-close { margin-left: 8px; cursor: pointer; font-weight: bold; } .tag-input { border: none; outline: none; flex-grow: 1; padding: 5px; min-width: 150px; }
+</style>
+{% endblock %}

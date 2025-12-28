@@ -1,0 +1,606 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style>
+  :root {
+    --panel-border: #e5e7eb;
+    --panel-shadow: 0 14px 38px rgba(2, 6, 23, 0.06);
+    --muted: #64748b;
+    --tree-line: rgba(148, 163, 184, 0.9);
+  }
+
+  .hierarchy-wrap {
+    display: grid;
+    grid-template-columns: 420px 1fr;
+    gap: 18px;
+    align-items: start;
+  }
+  @media (max-width: 992px) {
+    .hierarchy-wrap { grid-template-columns: 1fr; }
+  }
+
+  .tree-panel, .detail-panel {
+    background: #fff;
+    border: 1px solid var(--panel-border);
+    border-radius: 16px;
+    box-shadow: var(--panel-shadow);
+  }
+  .tree-panel { overflow: hidden; }
+
+  .tree-head, .detail-head {
+    padding: 12px 14px;
+    background: linear-gradient(180deg, #ffffff, #f8fafc);
+    border-bottom: 1px solid #eef2f7;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .tree-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    color: #0f172a;
+  }
+  .tree-body { padding: 12px; max-height: calc(100vh - 260px); overflow: auto; }
+  .detail-body { padding: 16px; }
+
+  /* Ağaç iskeleti (çizgiler) */
+  .tree ul { list-style: none; padding-left: 22px; margin: 8px 0; border-left: 2px solid var(--tree-line); }
+  .tree > ul { border-left: none; padding-left: 0; }
+  .tree li { margin: 8px 0; position: relative; }
+  .tree li::before {
+    content: "";
+    position: absolute;
+    left: -22px;
+    top: 18px;
+    width: 16px;
+    border-top: 2px solid var(--tree-line);
+  }
+  .tree > ul > li::before { display: none; }
+  .tree ul ul > li:last-child::after {
+    content: "";
+    position: absolute;
+    left: -22px;
+    top: 20px;
+    bottom: -10px;
+    width: 2px;
+    background: #fff;
+  }
+
+  /* Node görünümü */
+  .node {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 8px;
+    border-radius: 14px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background .15s ease, border-color .15s ease, transform .05s ease;
+  }
+  .node:hover { background: #f8fafc; border-color: #e2e8f0; }
+  .node:active { transform: translateY(1px); }
+  .node.active { background: #eff6ff; border-color: #bfdbfe; }
+  .node.drop-target { background: #ecfeff; border-color: #22d3ee; }
+
+  /* Etiket (pill) */
+  .node .badge {
+    font-size: 13px;
+    padding: 9px 12px;
+    border-radius: 999px;
+    font-weight: 700;
+    letter-spacing: .2px;
+    background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+    box-shadow: 0 10px 22px rgba(37, 99, 235, 0.18);
+    max-width: 100%;
+    white-space: normal;
+    line-height: 1.1;
+  }
+  .node.active .badge {
+    background: linear-gradient(135deg, #1d4ed8, #1e40af) !important;
+    box-shadow: 0 12px 26px rgba(37, 99, 235, 0.22);
+  }
+
+  /* Context menu */
+  .ctx {
+    position: fixed;
+    z-index: 9999;
+    background: #fff;
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    box-shadow: 0 18px 42px rgba(2, 6, 23, 0.18);
+    display: none;
+    min-width: 240px;
+    padding: 8px;
+  }
+  .ctx button { width: 100%; text-align: left; border-radius: 10px; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="m-0">Hiyerarşi</h2>
+  <small class="text-muted">Sağ tık: altına yetki/kullanıcı ekle • Tıkla: seç</small>
+</div>
+
+<div class="hierarchy-wrap">
+  <div class="tree-panel">
+    <div class="tree-head">
+      <div class="tree-title">
+        <i class="fa-solid fa-sitemap text-primary"></i>
+        <span>Yetki Ağacı</span>
+      </div>
+      <button class="btn btn-sm btn-outline-secondary" onclick="reloadTree()">Yenile</button>
+    </div>
+    <div class="tree-body">
+      <div id="tree" class="tree"></div>
+    </div>
+  </div>
+
+  <div class="detail-panel">
+    <div class="detail-head">
+      <div>
+        <h5 class="m-0" id="selTitle">Düğüm seçin</h5>
+        <small class="text-muted">Seçilen düğümün detayları (kullanıcı ekleme bu ekrandan kaldırıldı).</small>
+      </div>
+    </div>
+    <div class="detail-body">
+    <hr class="my-3">
+    <div class="mt-4">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <strong>Bu düğümdeki kullanıcı</strong>
+        <span class="badge bg-light text-dark border" id="userCount">0</span>
+      </div>
+      <div class="list-group" id="assignedUsers"></div>
+    </div>
+    </div>
+  </div>
+</div>
+
+<!-- Context menu -->
+<div class="ctx" id="ctxMenu">
+  <button class="btn btn-sm btn-light" id="ctxAddChildBtn" onclick="openAddChildModal()">Altına Yetki Ekle</button>
+  <button class="btn btn-sm btn-light" id="ctxAddUserBtn" onclick="openAddUserModal()">Altına Kullanıcı Ekle</button>
+  <div class="my-1" style="border-top:1px solid #eef2f7;"></div>
+  <button class="btn btn-sm btn-light" id="ctxUnassignBtn" onclick="unassignUserFromNode()">Kullanıcıyı Kaldır</button>
+  <button class="btn btn-sm btn-light text-danger" id="ctxDeleteBtn" onclick="deleteNode()">Düğümü Sil</button>
+  <div class="my-1" style="border-top:1px solid #eef2f7;"></div>
+  <button class="btn btn-sm btn-light text-danger" id="ctxMakeRootBtn" onclick="makeRoot()">Root yap (üstünü kaldır)</button>
+</div>
+
+<!-- Add child modal -->
+<div class="modal fade" id="addChildModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Altına Yetki Ekle</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label fw-bold">Eklenecek Yetki</label>
+        <select class="form-select" id="childSelect">
+          <option value="">Seçiniz...</option>
+          {% for k, v in authority_choices %}
+            {% if k != 'Admin' %}
+              <option value="{{ k }}">{{ v }}</option>
+            {% endif %}
+          {% endfor %}
+        </select>
+        <small class="text-muted d-block mt-2">Seçilen yetki başka bir yere bağlıysa yeni seçimin altına taşınır.</small>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">İptal</button>
+        <button class="btn btn-primary" onclick="addChild()">Ekle</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add user modal -->
+<div class="modal fade" id="addUserModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Altına Kullanıcı Ekle</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label fw-bold">Eklenecek Kullanıcı</label>
+        <select class="form-select" id="childUserSelect">
+          <option value="">Seçiniz...</option>
+        </select>
+        <small class="text-muted d-block mt-2">Seçilen kullanıcı, sağ tıkladığınız düğümün altına yeni bir düğüm olarak eklenir.</small>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">İptal</button>
+        <button class="btn btn-primary" onclick="addUserChild()">Ekle</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let NODES = {{ nodes_json|safe }};
+  const USERS = {{ users_json|safe }};
+  let selectedNodeId = null;
+  let ctxNodeId = null;
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+  const csrftoken = getCookie('csrftoken');
+
+  function escapeHtml(unsafe) {
+    return String(unsafe ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+  }
+
+  function nodeTitle(node) {
+    const full = `${node.assigned_user__first_name || ''} ${node.assigned_user__last_name || ''}`.trim();
+    const userName = full || node.assigned_user__user_code || '';
+    if (node.assigned_user_id) return `${userName} (${node.authority})`;
+    if (node.label) return `${node.label} (${node.authority})`;
+    return node.authority;
+  }
+
+  function buildTreeData(nodes) {
+    const map = {};
+    nodes.forEach(n => {
+      map[n.id] = { ...n, children: [] };
+    });
+    const roots = [];
+    nodes.forEach(n => {
+      const parentId = n.parent_id;
+      if (parentId && map[parentId]) map[parentId].children.push(map[n.id]);
+      else roots.push(map[n.id]);
+    });
+    // çocukları sıralayalım
+    Object.values(map).forEach(x => x.children.sort((a, b) => (a.sort_order - b.sort_order) || (a.id - b.id)));
+    roots.sort((a, b) => (a.sort_order - b.sort_order) || (a.id - b.id));
+    return roots;
+  }
+
+  function renderTree() {
+    const treeEl = document.getElementById('tree');
+    treeEl.innerHTML = '';
+    const roots = buildTreeData(NODES);
+    const ul = document.createElement('ul');
+    roots.forEach(r => ul.appendChild(renderNode(r)));
+    treeEl.appendChild(ul);
+  }
+
+  function renderNode(node) {
+    const li = document.createElement('li');
+    const div = document.createElement('div');
+    div.className = 'node';
+    div.dataset.nodeId = String(node.id);
+    div.innerHTML = `<span class="badge bg-primary">${escapeHtml(nodeTitle(node))}</span>`;
+    div.addEventListener('click', () => selectNode(node.id));
+    div.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      ctxNodeId = node.id;
+      openCtx(e.clientX, e.clientY);
+    });
+
+    // Drag & Drop (Admin taşınamaz)
+    div.draggable = node.authority !== 'Admin';
+    div.addEventListener('dragstart', (e) => {
+      if (!div.draggable) return;
+      e.dataTransfer.setData('text/plain', String(node.id));
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    div.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+    });
+    div.addEventListener('dragenter', () => div.classList.add('drop-target'));
+    div.addEventListener('dragleave', () => div.classList.remove('drop-target'));
+    div.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      div.classList.remove('drop-target');
+      const draggedId = Number(e.dataTransfer.getData('text/plain'));
+      if (!draggedId || draggedId === node.id) return;
+      await moveNode(draggedId, node.id);
+    });
+
+    li.appendChild(div);
+    if (node.children && node.children.length) {
+      const ul = document.createElement('ul');
+      node.children.forEach(c => ul.appendChild(renderNode(c)));
+      li.appendChild(ul);
+    }
+    return li;
+  }
+
+  function openCtx(x, y) {
+    const m = document.getElementById('ctxMenu');
+    m.style.left = x + 'px';
+    m.style.top = y + 'px';
+    m.style.display = 'block';
+    updateCtxMenuState();
+  }
+  function closeCtx() {
+    document.getElementById('ctxMenu').style.display = 'none';
+  }
+  document.addEventListener('click', closeCtx);
+
+  function reloadTree() { location.reload(); }
+
+  function getNodeById(id) {
+    const sid = String(id);
+    return NODES.find(n => String(n.id) === sid) || null;
+  }
+
+  function hasSwal() {
+    return (typeof Swal !== 'undefined') && Swal && typeof Swal.fire === 'function';
+  }
+
+  async function confirmAction({ title, text, html, confirmText, confirmColor }) {
+    if (hasSwal()) {
+      const res = await Swal.fire({
+        icon: 'warning',
+        title,
+        text,
+        html,
+        showCancelButton: true,
+        confirmButtonText: confirmText || 'Evet',
+        confirmButtonColor: confirmColor,
+        cancelButtonText: 'İptal'
+      });
+      return !!res.isConfirmed;
+    }
+    // Fallback (Swal yoksa)
+    return window.confirm(text || title || 'Onaylıyor musunuz?');
+  }
+
+  function showError(title, text) {
+    if (hasSwal()) return Swal.fire({ icon: 'error', title, text });
+    alert(`${title}\n${text || ''}`);
+  }
+
+  function updateCtxMenuState() {
+    const node = getNodeById(ctxNodeId);
+    const isAdmin = !!node && node.authority === 'Admin';
+    const hasUser = !!node && !!node.assigned_user_id;
+    const delBtn = document.getElementById('ctxDeleteBtn');
+    const rootBtn = document.getElementById('ctxMakeRootBtn');
+    const unassignBtn = document.getElementById('ctxUnassignBtn');
+    if (delBtn) delBtn.disabled = isAdmin;
+    if (rootBtn) rootBtn.disabled = isAdmin;
+    if (unassignBtn) unassignBtn.disabled = isAdmin || !hasUser;
+  }
+
+  function selectNode(nodeId) {
+    selectedNodeId = nodeId;
+    const node = NODES.find(n => n.id === nodeId);
+    document.getElementById('selTitle').textContent = node ? nodeTitle(node) : 'Düğüm seçin';
+    document.querySelectorAll('.node').forEach(n => n.classList.toggle('active', n.dataset.nodeId === String(nodeId)));
+    refreshAssignedUsers();
+  }
+
+  function refreshChildUserSelect() {
+    const sel = document.getElementById('childUserSelect');
+    sel.innerHTML = '<option value="">Seçiniz...</option>';
+    USERS.forEach(u => {
+      const name = (u.first_name + ' ' + u.last_name).trim() || u.user_code;
+      const opt = document.createElement('option');
+      opt.value = u.id;
+      opt.textContent = `${u.user_code} - ${name} (${u.authority})`;
+      sel.appendChild(opt);
+    });
+  }
+
+  function refreshAssignedUsers() {
+    const box = document.getElementById('assignedUsers');
+    const count = document.getElementById('userCount');
+    box.innerHTML = '';
+    count.textContent = '0';
+    if (!selectedNodeId) return;
+
+    const node = NODES.find(n => n.id === selectedNodeId);
+    if (!node) return;
+
+    if (node.assigned_user_id) {
+      count.textContent = '1';
+      const full = `${node.assigned_user__first_name || ''} ${node.assigned_user__last_name || ''}`.trim();
+      const display = full || node.assigned_user__user_code || '';
+      const el = document.createElement('div');
+      el.className = 'list-group-item d-flex justify-content-between align-items-center';
+      el.innerHTML = `<div><strong>${escapeHtml(display)}</strong><div class="small text-muted">${escapeHtml(node.assigned_user__user_code || '')}</div></div>`;
+      box.appendChild(el);
+    } else {
+      const el = document.createElement('div');
+      el.className = 'text-muted small';
+      el.textContent = 'Bu düğüme henüz kullanıcı atanmadı.';
+      box.appendChild(el);
+    }
+  }
+
+
+  function openAddChildModal() {
+    if (!ctxNodeId) return;
+    const modal = new bootstrap.Modal(document.getElementById('addChildModal'));
+    document.getElementById('childSelect').value = '';
+    modal.show();
+  }
+
+  async function addChild() {
+    const authority = document.getElementById('childSelect').value;
+    if (!authority || !ctxNodeId) return;
+    const res = await fetch("{% url 'hierarchy_create_node' %}", {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+      body: JSON.stringify({ parent_id: ctxNodeId, authority: authority })
+    });
+    const data = await res.json();
+    if (data.success) {
+      NODES.push(data.node);
+      const inst = bootstrap.Modal.getInstance(document.getElementById('addChildModal'));
+      if (inst) inst.hide();
+      renderTree();
+      selectNode(data.node.id);
+    } else {
+      Swal.fire({ icon: 'error', title: 'Hata', text: data.message || 'İşlem başarısız.' });
+    }
+  }
+
+  function openAddUserModal() {
+    if (!ctxNodeId) return;
+    refreshChildUserSelect();
+    document.getElementById('childUserSelect').value = '';
+    const modal = new bootstrap.Modal(document.getElementById('addUserModal'));
+    modal.show();
+  }
+
+  async function addUserChild() {
+    const userId = document.getElementById('childUserSelect').value;
+    if (!userId || !ctxNodeId) return;
+    const u = USERS.find(x => String(x.id) === String(userId));
+    if (!u) return;
+
+    const res = await fetch("{% url 'hierarchy_create_node' %}", {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+      body: JSON.stringify({ parent_id: ctxNodeId, authority: u.authority, label: u.user_code, assigned_user_id: u.id })
+    });
+    const data = await res.json();
+    if (data.success) {
+      NODES.push(data.node);
+      const inst = bootstrap.Modal.getInstance(document.getElementById('addUserModal'));
+      if (inst) inst.hide();
+      renderTree();
+      selectNode(data.node.id);
+    } else {
+      Swal.fire({ icon: 'error', title: 'Hata', text: data.message || 'İşlem başarısız.' });
+    }
+  }
+
+  async function makeRoot() {
+    if (!ctxNodeId) return;
+    const res = await fetch("{% url 'hierarchy_set_parent' %}", {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+      body: JSON.stringify({ child_id: ctxNodeId, parent_id: null })
+    });
+    const data = await res.json();
+    if (data.success) {
+      const idx = NODES.findIndex(n => n.id === data.node.id);
+      if (idx >= 0) NODES[idx] = data.node;
+      renderTree();
+    }
+    else Swal.fire({ icon: 'error', title: 'Hata', text: data.message || 'İşlem başarısız.' });
+  }
+
+  async function unassignUserFromNode() {
+    if (!ctxNodeId) return;
+    const node = getNodeById(ctxNodeId);
+    if (!node || !node.assigned_user_id) return;
+    const ok = await confirmAction({
+      title: 'Kullanıcı kaldırılsın mı?',
+      text: 'Bu düğümden kullanıcı bağlantısı kaldırılacak.',
+      confirmText: 'Kaldır'
+    });
+    if (!ok) return;
+
+    const res = await fetch("{% url 'hierarchy_unassign_user' %}", {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+      body: JSON.stringify({ node_id: ctxNodeId })
+    });
+    const data = await res.json();
+    if (data.success) {
+      const idx = NODES.findIndex(n => n.id === data.node.id);
+      if (idx >= 0) NODES[idx] = data.node;
+      renderTree();
+      if (selectedNodeId === data.node.id) selectNode(data.node.id);
+    } else {
+      showError('Hata', data.message || 'İşlem başarısız.');
+    }
+  }
+
+  async function deleteNode() {
+    if (!ctxNodeId) return;
+    const node = getNodeById(ctxNodeId);
+    if (!node || node.authority === 'Admin') return;
+
+    const ok = await confirmAction({
+      title: 'Düğüm silinsin mi?',
+      html: `<div class="small text-muted">Silinecek: <strong>${escapeHtml(nodeTitle(node))}</strong><br>Alt düğümler varsa bir üst düğüme taşınır.</div>`,
+      confirmText: 'Sil',
+      confirmColor: '#dc3545'
+    });
+    if (!ok) return;
+
+    const res = await fetch("{% url 'hierarchy_delete_node' %}", {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+      body: JSON.stringify({ node_id: ctxNodeId })
+    });
+    const data = await res.json();
+    if (data.success) {
+      NODES = NODES.filter(n => n.id !== data.deleted_id);
+      (data.reparented || []).forEach(r => {
+        const idx = NODES.findIndex(n => n.id === r.id);
+        if (idx >= 0) {
+          NODES[idx].parent_id = r.parent_id;
+          NODES[idx].sort_order = r.sort_order;
+        }
+      });
+      renderTree();
+      if (selectedNodeId === data.deleted_id) {
+        const admin = NODES.find(n => n.authority === 'Admin') || NODES[0];
+        if (admin) selectNode(admin.id);
+      }
+    } else {
+      showError('Hata', data.message || 'İşlem başarısız.');
+    }
+  }
+
+  async function moveNode(childId, parentId) {
+    const child = getNodeById(childId);
+    const parent = getNodeById(parentId);
+    if (!child || !parent) return;
+    if (child.authority === 'Admin') return;
+
+    const res = await fetch("{% url 'hierarchy_set_parent' %}", {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+      body: JSON.stringify({ child_id: childId, parent_id: parentId })
+    });
+    const data = await res.json();
+    if (data.success) {
+      const idx = NODES.findIndex(n => n.id === data.node.id);
+      if (idx >= 0) NODES[idx] = data.node;
+      renderTree();
+      if (selectedNodeId === data.node.id) selectNode(data.node.id);
+    } else {
+      showError('Taşıma Hatası', data.message || 'İşlem başarısız.');
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', function(){
+    renderTree();
+    refreshChildUserSelect();
+    // varsayılan olarak Admin düğümünü seç (varsa)
+    const admin = NODES.find(n => n.authority === 'Admin') || NODES[0];
+    if (admin) selectNode(admin.id);
+  });
+</script>
+{% endblock %}
+
+

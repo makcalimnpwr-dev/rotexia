@@ -1,0 +1,416 @@
+{% extends 'base.html' %}
+{% load custom_tags %}
+
+{% block content %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="m-0">Günlük Ziyaret Özeti</h2>
+    <div class="text-muted small">{{ summary_date|date:"d.m.Y" }}</div>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="{% url 'reports_home' %}">
+      <i class="fas fa-arrow-left"></i> Raporlar
+    </a>
+    <button class="btn btn-outline-primary" type="button" data-bs-toggle="modal" data-bs-target="#colorsModal">
+      <i class="fas fa-palette"></i> Grafik Renkleri
+    </button>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-3 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label fw-bold small">Özet Günü</label>
+        <input type="date" class="form-control" name="date" value="{{ summary_date|date:'Y-m-d' }}">
+      </div>
+      <div class="col-md-3 d-grid">
+        <button type="submit" class="btn btn-dark">
+          <i class="fas fa-filter"></i> Uygula
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="fw-bold mb-2">Genel Toplam (Planlı Gerçekleşen Ziyaret %)</div>
+        <div class="d-flex justify-content-center">
+          {# Donut tam ortalansın diye kare canvas kullanıyoruz #}
+          <div style="position:relative; width: 240px; height: 240px;">
+            <canvas id="donutChart" width="240" height="240" style="display:block; width:240px; height:240px;"></canvas>
+            <div style="position:absolute; left:50%; top:50%; transform:translate(-50%, -50%); pointer-events:none; text-align:center; width: 100%; font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;">
+              <div style="font-size: 44px; font-weight: 800; line-height: 1.0; color: #111827; letter-spacing: -0.5px;">
+                %{{ totals.percent }}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="text-center mt-2" style="font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; font-size: 22px; font-weight: 800; color: #111827; letter-spacing: -0.2px;">
+          {{ totals.completed }}/{{ totals.planned }}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="fw-bold mb-2">Personel Bazlı (Planlanan vs Gerçekleşen)</div>
+        <canvas id="barChart" style="max-height:260px;"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mt-3">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div class="fw-bold">Günlük Ziyaret Özeti (Tablo)</div>
+      <div class="small text-muted">{{ summary_date|date:"d.m.Y" }} tarihindeki planlı görevler</div>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th class="editable-th" data-key="user">{{ table_headers.user }}</th>
+            <th class="text-center editable-th" data-key="completed">{{ table_headers.completed }}</th>
+            <th class="text-center editable-th" data-key="planned">{{ table_headers.planned }}</th>
+            <th class="text-center editable-th" data-key="stores">{{ table_headers.stores }}</th>
+            <th class="text-center editable-th" data-key="percent">{{ table_headers.percent }}</th>
+            <th class="text-center editable-th" data-key="first_in">{{ table_headers.first_in }}</th>
+            <th class="text-center editable-th" data-key="last_out">{{ table_headers.last_out }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td>
+              <div class="fw-bold">{{ r.user_name }}</div>
+            </td>
+            <td class="text-center">{{ r.completed }}</td>
+            <td class="text-center">{{ r.planned }}</td>
+            <td class="text-center">{{ r.stores }}</td>
+            <td class="text-center fw-bold">%{{ r.percent }}</td>
+            <td class="text-center">{{ r.first_in_time|default:"-" }}</td>
+            <td class="text-center">{{ r.last_out_time|default:"-" }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="7" class="text-center text-muted py-4">Kayıt yok.</td></tr>
+          {% endfor %}
+        </tbody>
+        <tfoot class="table-light">
+          <tr>
+            <th>Genel Toplam</th>
+            <th class="text-center">{{ totals.completed }}</th>
+            <th class="text-center">{{ totals.planned }}</th>
+            <th class="text-center">{{ totals.stores }}</th>
+            <th class="text-center fw-bold">%{{ totals.percent }}</th>
+            <th class="text-center">-</th>
+            <th class="text-center">-</th>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Colors modal -->
+<div class="modal fade" id="colorsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Grafik Renkleri</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="colorsSaveMsg" class="alert d-none py-2 mb-3" role="alert"></div>
+        <div class="row g-3">
+          <div class="col-6">
+            <label class="form-label small fw-bold">Donut - Tamamlanan</label>
+            <input type="color" class="form-control form-control-color w-100" id="cDonutCompleted">
+          </div>
+          <div class="col-6">
+            <label class="form-label small fw-bold">Donut - Kalan</label>
+            <input type="color" class="form-control form-control-color w-100" id="cDonutRemaining">
+          </div>
+          <div class="col-6">
+            <label class="form-label small fw-bold">Bar - Planlanan</label>
+            <input type="color" class="form-control form-control-color w-100" id="cBarPlanned">
+          </div>
+          <div class="col-6">
+            <label class="form-label small fw-bold">Bar - Gerçekleşen</label>
+            <input type="color" class="form-control form-control-color w-100" id="cBarCompleted">
+          </div>
+        </div>
+        <div class="text-muted small mt-3">
+          Kaydettiğiniz renkler sayfayı yenileseniz bile aynı kalır.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Kapat</button>
+        <button class="btn btn-primary" type="button" onclick="saveChartColors()">Kaydet</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const CHARTS = {{ charts_json|safe }};
+  const CHART_COLORS = {{ chart_colors_json|safe }};
+
+  let donutChartInstance = null;
+  let barChartInstance = null;
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  async function savePrefs(payload) {
+    const res = await fetch("{% url 'daily_visit_summary_save_prefs' %}", {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken') || '{{ csrf_token }}',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body: JSON.stringify(payload),
+      credentials: 'same-origin'
+    });
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (!ct.includes('application/json')) {
+      const txt = await res.text();
+      throw new Error(`Sunucudan beklenmeyen cevap geldi (${res.status}).`);
+    }
+    const data = await res.json();
+    if (!res.ok || (data && data.success === false)) {
+      throw new Error((data && data.message) ? data.message : `Kaydetme başarısız (${res.status}).`);
+    }
+    return data;
+  }
+
+  async function saveChartColors() {
+    const msg = document.getElementById('colorsSaveMsg');
+    const showMsg = (text, ok) => {
+      if (!msg) return;
+      msg.classList.remove('d-none', 'alert-success', 'alert-danger');
+      msg.classList.add(ok ? 'alert-success' : 'alert-danger');
+      msg.textContent = text;
+    };
+    try {
+      const colors = {
+        donut_completed: document.getElementById('cDonutCompleted').value,
+        donut_remaining: document.getElementById('cDonutRemaining').value,
+        bar_planned: document.getElementById('cBarPlanned').value,
+        bar_completed: document.getElementById('cBarCompleted').value,
+      };
+      await savePrefs({ colors });
+
+      // Apply to charts without reload
+      if (donutChartInstance) {
+        donutChartInstance.data.datasets[0].backgroundColor = [colors.donut_completed, colors.donut_remaining];
+        donutChartInstance.update();
+      }
+      if (barChartInstance) {
+        barChartInstance.data.datasets[0].backgroundColor = colors.bar_planned;
+        barChartInstance.data.datasets[1].backgroundColor = colors.bar_completed;
+        barChartInstance.update();
+      }
+
+      showMsg('Kaydedildi.', true);
+      // Modal kapatma bootstrap yoksa hata vermesin
+      try {
+        if (window.bootstrap && bootstrap.Modal) {
+          const inst = bootstrap.Modal.getInstance(document.getElementById('colorsModal'));
+          if (inst) inst.hide();
+        }
+      } catch (e) {}
+    } catch (e) {
+      showMsg((e && e.message) ? e.message : 'Kaydetme sırasında hata oluştu.', false);
+      console.error(e);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    const totalPlanned = CHARTS.total_planned || 0;
+    const totalCompleted = CHARTS.total_completed || 0;
+    const remaining = Math.max(0, totalPlanned - totalCompleted);
+
+    const donutEl = document.getElementById('donutChart');
+    if (donutEl) {
+      donutChartInstance = new Chart(donutEl, {
+        type: 'doughnut',
+        data: {
+          labels: ['Tamamlanan', 'Kalan'],
+          datasets: [{
+            data: [totalCompleted, remaining],
+            backgroundColor: [CHART_COLORS.donut_completed, CHART_COLORS.donut_remaining],
+            borderColor: ['#ffffff', '#ffffff'],
+            borderWidth: 2,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '70%',
+          plugins: {
+            legend: { display: false },
+          }
+        }
+      });
+    }
+
+    const barEl = document.getElementById('barChart');
+    if (barEl) {
+      // Bar üstü değer etiketleri (beyaz kutu içinde, grafik içinde)
+      const valueLabelPlugin = {
+        id: 'valueLabelPlugin',
+        afterDatasetsDraw(chart) {
+          const { ctx } = chart;
+          ctx.save();
+          ctx.font = "700 12px Inter, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          chart.data.datasets.forEach((dataset, datasetIndex) => {
+            const meta = chart.getDatasetMeta(datasetIndex);
+            if (meta.hidden) return;
+            meta.data.forEach((element, index) => {
+              const val = dataset.data[index];
+              if (val === null || val === undefined) return;
+              const text = String(val);
+              // Sıfırları da gösterelim (istersen kaldırırız)
+
+              const { x, y } = element.tooltipPosition();
+              // Bar yüksekliği çok küçükse etiketi biraz yukarı al
+              const padX = 6;
+              const padY = 4;
+              const metrics = ctx.measureText(text);
+              const w = metrics.width + padX * 2;
+              const h = 18;
+
+              // Etiket konumu: barın içinde, üst kısma yakın
+              const yPos = y + 14; // barın tepesinden biraz aşağı
+              const xPos = x;
+
+              // Renkler: beyaz arka plan, pembe border + yazı
+              const accent = (dataset.backgroundColor && typeof dataset.backgroundColor === 'string')
+                ? dataset.backgroundColor
+                : '#ff0066';
+
+              // Rounded rect
+              const r = 6;
+              const left = xPos - w / 2;
+              const top = yPos - h / 2;
+
+              // Kutuyu grafik alanı içinde tut
+              const ca = chart.chartArea;
+              const clampedLeft = Math.max(ca.left + 2, Math.min(left, ca.right - w - 2));
+              const clampedTop = Math.max(ca.top + 2, Math.min(top, ca.bottom - h - 2));
+
+              ctx.beginPath();
+              const right = clampedLeft + w;
+              const bottom = clampedTop + h;
+              ctx.moveTo(clampedLeft + r, clampedTop);
+              ctx.lineTo(right - r, clampedTop);
+              ctx.quadraticCurveTo(right, clampedTop, right, clampedTop + r);
+              ctx.lineTo(right, bottom - r);
+              ctx.quadraticCurveTo(right, bottom, right - r, bottom);
+              ctx.lineTo(clampedLeft + r, bottom);
+              ctx.quadraticCurveTo(clampedLeft, bottom, clampedLeft, bottom - r);
+              ctx.lineTo(clampedLeft, clampedTop + r);
+              ctx.quadraticCurveTo(clampedLeft, clampedTop, clampedLeft + r, clampedTop);
+              ctx.closePath();
+
+              ctx.fillStyle = '#ffffff';
+              ctx.fill();
+              ctx.lineWidth = 2;
+              ctx.strokeStyle = accent;
+              ctx.stroke();
+
+              ctx.fillStyle = accent;
+              ctx.fillText(text, clampedLeft + w / 2, clampedTop + h / 2 + 0.5);
+            });
+          });
+
+          ctx.restore();
+        }
+      };
+
+      barChartInstance = new Chart(barEl, {
+        type: 'bar',
+        data: {
+          labels: CHARTS.labels || [],
+          datasets: [
+            { label: 'Planlanan', data: CHARTS.planned || [], backgroundColor: CHART_COLORS.bar_planned, borderRadius: 6 },
+            { label: 'Gerçekleşen', data: CHARTS.completed || [], backgroundColor: CHART_COLORS.bar_completed, borderRadius: 6 },
+          ]
+        },
+        options: {
+          responsive: true,
+          scales: { y: { beginAtZero: true } },
+          plugins: { legend: { position: 'bottom' } }
+        },
+        plugins: [valueLabelPlugin]
+      });
+    }
+
+    // Initialize color pickers
+    document.getElementById('cDonutCompleted').value = CHART_COLORS.donut_completed;
+    document.getElementById('cDonutRemaining').value = CHART_COLORS.donut_remaining;
+    document.getElementById('cBarPlanned').value = CHART_COLORS.bar_planned;
+    document.getElementById('cBarCompleted').value = CHART_COLORS.bar_completed;
+
+    // Editable table headers (double click)
+    const currentHeaders = {
+      user: "{{ table_headers.user|escapejs }}",
+      completed: "{{ table_headers.completed|escapejs }}",
+      planned: "{{ table_headers.planned|escapejs }}",
+      stores: "{{ table_headers.stores|escapejs }}",
+      percent: "{{ table_headers.percent|escapejs }}",
+      first_in: "{{ table_headers.first_in|escapejs }}",
+      last_out: "{{ table_headers.last_out|escapejs }}",
+    };
+
+    document.querySelectorAll('.editable-th').forEach(th => {
+      th.title = "Çift tıkla düzenle";
+      th.style.cursor = 'pointer';
+      th.addEventListener('dblclick', async () => {
+        const key = th.dataset.key;
+        const current = currentHeaders[key] || th.textContent.trim();
+        const next = window.prompt("Başlık adını girin:", current);
+        if (next === null) return;
+        const cleaned = String(next).trim();
+        if (!cleaned) return;
+        th.textContent = cleaned;
+        currentHeaders[key] = cleaned;
+        try {
+          await savePrefs({ headers: { [key]: cleaned } });
+        } catch (e) {
+          console.error(e);
+        }
+      });
+    });
+  });
+</script>
+{% endblock %}
+
+

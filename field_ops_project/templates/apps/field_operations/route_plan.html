@@ -1,0 +1,569 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2><i class="fas fa-route text-primary"></i> Rota Planlaması</h2>
+    
+    <div class="d-flex gap-2">
+        <form id="mainBulkDeleteForm" action="{% url 'route_bulk_delete' %}" method="post" onsubmit="return confirm('DİKKAT: Seçili rotaları ve BEKLEYEN görevlerini silmek istediğinize emin misiniz?');">
+            {% csrf_token %}
+            <div id="hiddenDeleteInputs"></div>
+            <button type="button" onclick="submitBulkDelete()" class="btn btn-danger shadow-sm fw-bold">
+                <i class="fas fa-trash"></i> Seçilenleri Sil
+            </button>
+        </form>
+
+        <button class="btn btn-success shadow-sm fw-bold" data-bs-toggle="modal" data-bs-target="#importRouteModal">
+            <i class="fas fa-file-excel"></i> Rota Yükle / Güncelle
+        </button>
+    </div>
+</div>
+
+<div class="modal fade" id="importRouteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="fas fa-file-excel"></i> Rota Excel Yükle</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="{% url 'import_route_plan' %}" method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="alert alert-info small">
+                        <strong><i class="fas fa-info-circle"></i> Kısmi Güncelleme Modu:</strong>
+                        <ul class="mb-0 ps-3">
+                            <li>Dosyada <strong>Saha Kullanıcısı</strong> ve (<strong>Sistem ID</strong> veya <strong>Kod</strong>) zorunludur.</li>
+                            <li><strong>Gün 1, Gün 2...</strong> sütunlarında "1" yazanlar plana eklenir.</li>
+                            <li>Excel'de <u>olmayan</u> gün sütunlarına dokunulmaz.</li>
+                        </ul>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Excel Dosyası Seç</label>
+                        <input type="file" name="excel_file" class="form-control" accept=".xlsx, .xls" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-success fw-bold w-100">Yüklemeyi Başlat</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="accordion mb-4 shadow-sm" id="filterAccordion">
+    <div class="accordion-item">
+        <h2 class="accordion-header">
+            <button class="accordion-button collapsed fw-bold text-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#filterCollapse">
+                <i class="fas fa-filter me-2"></i> Filtreleme Seçenekleri
+            </button>
+        </h2>
+        <div id="filterCollapse" class="accordion-collapse collapse" data-bs-parent="#filterAccordion">
+            <div class="accordion-body bg-light">
+                <form method="get" class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label small fw-bold">Müşteri Ara</label>
+                        <input type="text" name="search" class="form-control" value="{{ f_search }}" placeholder="Ad veya Kod...">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small fw-bold">Personel</label>
+                        <select name="merch" class="form-select">
+                            <option value="">Tümü</option>
+                            {% for m in merchandisers %}
+                            <option value="{{ m }}" {% if f_merch == m %}selected{% endif %}>{{ m }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small fw-bold">Gün (1-28)</label>
+                        <input type="number" name="day" class="form-control" min="1" max="28" value="{{ f_day }}">
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end">
+                        <button type="submit" class="btn btn-primary w-100"><i class="fas fa-search"></i> Filtrele</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="accordion shadow-sm" id="accordionRoutes">
+    {% for merch, routes in grouped_routes.items %}
+    <div class="accordion-item">
+        <h2 class="accordion-header">
+            <button class="accordion-button {% if not forloop.first %}collapsed{% endif %} fw-bold" type="button" data-bs-toggle="collapse" data-bs-target="#collapse{{ forloop.counter }}">
+                <i class="fas fa-user-tag me-2 text-primary"></i> {{ merch }}
+                <span class="badge bg-secondary ms-3">{{ routes|length }} Mağaza</span>
+            </button>
+        </h2>
+        
+        <div id="collapse{{ forloop.counter }}" class="accordion-collapse collapse {% if forloop.first %}show{% endif %}" data-bs-parent="#accordionRoutes">
+            <div class="accordion-body bg-light">
+                
+                <div class="d-flex justify-content-end gap-2 mb-3">
+                    <button type="button" class="btn btn-success btn-sm fw-bold shadow-sm" onclick="openBulkDayModal('{{ merch }}')">
+                        <i class="fas fa-calendar-plus"></i> Seçilenlere Gün Ata
+                    </button>
+                    <button type="button" class="btn btn-primary btn-sm fw-bold shadow-sm" onclick="openAddStoreModal('{{ merch }}')">
+                        <i class="fas fa-plus-circle"></i> Mağaza Ekle
+                    </button>
+                    <form action="{% url 'sync_merch_routes' %}" method="post" class="d-inline">
+                        {% csrf_token %}
+                        <input type="hidden" name="merch_code" value="{{ merch }}">
+                        <button type="submit" class="btn btn-warning btn-sm fw-bold shadow-sm" title="Eksik görevleri tamamlar">
+                            <i class="fas fa-sync-alt"></i> Revize Et
+                        </button>
+                    </form>
+                </div>
+
+                <div class="card border-0 shadow-sm">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0" id="table-{{ merch|slugify }}">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width: 30px;">
+                                        <input type="checkbox" class="form-check-input" onchange="toggleMerchSelect(this, 'table-{{ merch|slugify }}')">
+                                    </th>
+                                    <th style="width: 40%;">Müşteri</th>
+                                    <th>Ziyaret Günleri</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for route in routes %}
+                                <tr>
+                                    <td>
+                                        <input type="checkbox" name="route_ids" value="{{ route.id }}" class="form-check-input route-check">
+                                    </td>
+                                    <td>
+                                        <div class="fw-bold text-dark">{{ route.customer.name }}</div>
+                                        <div class="small text-muted font-monospace">{{ route.customer.customer_code }}</div>
+                                    </td>
+                                    <td>
+                                        <div class="days-wrapper" data-merch="{{ merch }}">
+                                            <span class="raw-days d-none">{{ route.active_days }}</span>
+                                            <div class="formatted-days d-flex flex-wrap gap-1"></div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% empty %}
+    <div class="alert alert-warning text-center">Kayıtlı rota bulunamadı.</div>
+    {% endfor %}
+</div>
+
+<div class="modal fade" id="bulkDayModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="fas fa-calendar-plus"></i> Seçilenlere Gün Ata</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="{% url 'route_bulk_add_day' %}" method="post">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <p>Seçili mağazaların mevcut günlerine ek olarak aşağıdaki günü ekle:</p>
+                    <div id="selectedRoutesContainer"></div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Eklenecek Gün (1-28)</label>
+                        <input type="number" name="day_to_add" class="form-control form-control-lg text-center" min="1" max="28" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-success fw-bold w-100">Kaydet ve Ata</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="addStoreModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="fas fa-plus-circle"></i> Rotaya Yeni Mağaza Ekle</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="{% url 'add_store_to_route' %}" method="post">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <input type="hidden" name="merch_code" id="addStoreMerch">
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Müşteri Ara</label>
+                        <input type="text" class="form-control" id="customerSearchInput" placeholder="İsim veya Kod yazın..." onkeyup="searchCustomers()">
+                        <div id="searchResults" class="list-group mt-2 shadow-sm" style="max-height: 200px; overflow-y: auto; display: none;"></div>
+                        
+                        <div id="selectedCustomerDisplay" class="alert alert-info mt-2 d-none">
+                            <i class="fas fa-check-circle"></i> <strong id="selectedCustName"></strong> seçildi.
+                        </div>
+                        <input type="hidden" name="customer_id" id="selectedCustId" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Hangi Güne Eklensin? (1-28)</label>
+                        <input type="number" name="day" class="form-control" min="1" max="28" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-primary fw-bold w-100">Listeye Ekle</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="dayDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content" style="height: 90vh;">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><span id="modalTitle">Detaylar</span></h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0 d-flex">
+                <div id="routeMap" style="width: 60%; height: 100%; border-right: 1px solid #ddd;"></div>
+                
+                <div class="p-3" style="width: 40%; overflow-y: auto; background-color: #f8f9fa;">
+                    <div id="customerListContainer"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="replaceStoreModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title"><i class="fas fa-exchange-alt"></i> Mağaza Değiştir</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="replaceRouteId">
+                <input type="hidden" id="replaceDay">
+                <input type="hidden" id="replaceNewCustId">
+
+                <div class="alert alert-light border small text-muted">
+                    <i class="fas fa-info-circle"></i> Seçilen mağaza bu günden kaldırılacak, görevleri silinecek ve yerine seçtiğiniz yeni mağaza eklenecektir.
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Yeni Mağaza Ara</label>
+                    <input type="text" class="form-control" id="replaceSearchInput" placeholder="İsim veya Kod yazın..." onkeyup="searchReplaceCustomers()">
+                    <div id="replaceSearchResults" class="list-group mt-2 shadow-sm" style="max-height: 200px; overflow-y: auto; display: none;"></div>
+                </div>
+
+                <div id="replaceSelectionDisplay" class="alert alert-warning d-none">
+                    <strong>Seçilen:</strong> <span id="replaceCustName"></span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-dark fw-bold w-100" onclick="executeReplace()">Değişimi Onayla</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    var map = null;
+
+    // --- 1. TOPLU SİLME MANTIĞI ---
+    function submitBulkDelete() {
+        var form = document.getElementById('mainBulkDeleteForm');
+        var container = document.getElementById('hiddenDeleteInputs');
+        container.innerHTML = '';
+        
+        var checked = document.querySelectorAll('.route-check:checked');
+        if (checked.length === 0) {
+            alert("Silinecek rota seçmediniz.");
+            return;
+        }
+
+        checked.forEach(cb => {
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'selected_routes';
+            input.value = cb.value;
+            container.appendChild(input);
+        });
+
+        // Form gönderilir (onsubmit'teki confirm çalışır)
+        form.requestSubmit();
+    }
+
+    // --- 2. GÜNLERİ GÖRSELLEŞTİRME ---
+    document.addEventListener("DOMContentLoaded", function() {
+        document.querySelectorAll('.days-wrapper').forEach(function(wrapper) {
+            var rawText = wrapper.querySelector('.raw-days').innerText;
+            var container = wrapper.querySelector('.formatted-days');
+            var merch = wrapper.dataset.merch;
+            var cleanText = rawText.replace(/[\[\]'"]/g, "");
+            var days = cleanText.split(',');
+            var html = "";
+            days.forEach(function(day) {
+                var d = day.trim();
+                if(d) {
+                    html += `<a href="#" onclick="openDayModal(this.getAttribute('data-merch'), '${d}'); return false;" 
+                              data-merch="${merch}"
+                              class="badge bg-primary text-decoration-none border border-light rounded-pill px-3 py-2 shadow-sm days-btn">
+                              ${d}
+                              </a>`;
+                }
+            });
+            if(html) container.innerHTML = html;
+        });
+    });
+
+    // --- 3. DETAY MODALI (HARİTA + GELİŞMİŞ LİSTE) ---
+    function openDayModal(merch, day) {
+        document.getElementById('modalTitle').innerText = `${merch} - ${day}. Gün Rotası`;
+        document.getElementById('customerListContainer').innerHTML = '<div class="text-center mt-5"><div class="spinner-border text-primary"></div><p>Yükleniyor...</p></div>';
+        
+        var myModal = new bootstrap.Modal(document.getElementById('dayDetailModal'));
+        myModal.show();
+        
+        if (map) { map.off(); map.remove(); map = null; }
+        document.getElementById('routeMap').innerHTML = "";
+
+        setTimeout(() => {
+            map = L.map('routeMap').setView([41.0082, 28.9784], 10);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+
+            var url = `{% url 'get_route_day_details' %}?merch=${encodeURIComponent(merch)}&day=${day}`;
+            fetch(url).then(r => r.json()).then(data => {
+                 var listHtml = "";
+                 var bounds = [];
+                 
+                 if (data.length === 0) {
+                     document.getElementById('customerListContainer').innerHTML = '<div class="alert alert-warning">Veri yok.</div>';
+                     return;
+                 }
+
+                 data.forEach(item => {
+                    // YENİ GÜNCELLEME: Listenin yanına DROP-DOWN menü eklendi
+                    listHtml += `
+                    <div class="card mb-2 shadow-sm border-start border-4 border-primary">
+                        <div class="card-body p-2">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <strong class="text-dark">${item.customer_name}</strong>
+                                    <div class="small text-muted">${item.city} / ${item.district}</div>
+                                </div>
+                                <div class="dropdown">
+                                    <button class="btn btn-sm btn-light border" type="button" data-bs-toggle="dropdown">
+                                        <i class="fas fa-ellipsis-v"></i>
+                                    </button>
+                                    <ul class="dropdown-menu dropdown-menu-end shadow">
+                                        <li>
+                                            <a class="dropdown-item text-warning fw-bold" href="#" onclick="openReplaceModal(${item.route_id}, ${day}); return false;">
+                                                <i class="fas fa-exchange-alt me-2"></i> Değiştir
+                                            </a>
+                                        </li>
+                                        <li><hr class="dropdown-divider"></li>
+                                        <li>
+                                            <a class="dropdown-item text-danger fw-bold" href="#" onclick="deleteStoreFromDay(${item.route_id}, ${day}, '${item.customer_name}'); return false;">
+                                                <i class="fas fa-trash me-2"></i> Bu Günden Sil
+                                            </a>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+
+                     if (item.lat && item.lng) {
+                         L.marker([item.lat, item.lng]).addTo(map).bindPopup(`<b>${item.customer_name}</b><br>${item.district}`);
+                         bounds.push([item.lat, item.lng]);
+                     }
+                 });
+                 
+                 document.getElementById('customerListContainer').innerHTML = listHtml;
+                 if (bounds.length > 0) map.fitBounds(bounds, {padding: [50, 50]});
+            });
+        }, 300);
+    }
+
+    // --- 4. TEKLİ SİLME & DEĞİŞTİRME AKSİYONLARI ---
+
+    // A. Günden Silme
+    function deleteStoreFromDay(routeId, day, name) {
+        if(!confirm(name + " mağazasını " + day + ". günden silmek istiyor musunuz? İlgili bekleyen görevler de silinecek.")) return;
+
+        var formData = new FormData();
+        formData.append('route_id', routeId);
+        formData.append('day', day);
+        formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+        fetch("{% url 'route_remove_day_api' %}", { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+            if(data.status === 'success') {
+                bootstrap.Modal.getInstance(document.getElementById('dayDetailModal')).hide();
+                alert("Silindi.");
+                location.reload(); 
+            } else {
+                alert("Hata: " + data.msg);
+            }
+        });
+    }
+
+    // B. Değiştirme Modalını Aç
+    function openReplaceModal(routeId, day) {
+        document.getElementById('replaceRouteId').value = routeId;
+        document.getElementById('replaceDay').value = day;
+        document.getElementById('replaceSearchInput').value = '';
+        document.getElementById('replaceSearchResults').innerHTML = '';
+        document.getElementById('replaceSelectionDisplay').classList.add('d-none');
+        
+        // Detay modalını gizle
+        bootstrap.Modal.getInstance(document.getElementById('dayDetailModal')).hide();
+        
+        new bootstrap.Modal(document.getElementById('replaceStoreModal')).show();
+    }
+
+    // C. Değiştirme için Müşteri Ara
+    let replaceTimeout;
+    function searchReplaceCustomers() {
+        clearTimeout(replaceTimeout);
+        var query = document.getElementById('replaceSearchInput').value;
+        var resultsDiv = document.getElementById('replaceSearchResults');
+        
+        if (query.length < 2) { resultsDiv.style.display = 'none'; return; }
+
+        replaceTimeout = setTimeout(() => {
+            fetch(`{% url 'search_customer_api' %}?q=${encodeURIComponent(query)}`)
+                .then(res => res.json())
+                .then(data => {
+                    resultsDiv.innerHTML = '';
+                    if (data.length > 0) {
+                        resultsDiv.style.display = 'block';
+                        data.forEach(cust => {
+                            var item = document.createElement('a');
+                            item.className = 'list-group-item list-group-item-action';
+                            item.innerHTML = `<strong>${cust.name}</strong> <small>(${cust.code})</small>`;
+                            item.href = '#';
+                            item.onclick = function(e) {
+                                e.preventDefault();
+                                document.getElementById('replaceNewCustId').value = cust.id;
+                                document.getElementById('replaceCustName').innerText = cust.name;
+                                document.getElementById('replaceSelectionDisplay').classList.remove('d-none');
+                                resultsDiv.style.display = 'none';
+                            };
+                            resultsDiv.appendChild(item);
+                        });
+                    } else { resultsDiv.style.display = 'none'; }
+                });
+        }, 300);
+    }
+
+    // D. Değişimi Onayla
+    function executeReplace() {
+        var routeId = document.getElementById('replaceRouteId').value;
+        var day = document.getElementById('replaceDay').value;
+        var newCustId = document.getElementById('replaceNewCustId').value;
+
+        if (!newCustId) { alert("Lütfen yeni bir mağaza seçin."); return; }
+
+        var formData = new FormData();
+        formData.append('route_id', routeId);
+        formData.append('day', day);
+        formData.append('new_customer_id', newCustId);
+        formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+        fetch("{% url 'route_replace_store_api' %}", { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+            if(data.status === 'success') {
+                alert("Mağaza değiştirildi ve görevler güncellendi.");
+                location.reload();
+            } else {
+                alert("Hata: " + data.msg);
+            }
+        });
+    }
+
+    // --- MEVCUT YARDIMCI FONKSİYONLAR ---
+    function toggleMerchSelect(source, tableId) {
+        var checkboxes = document.querySelectorAll('#' + tableId + ' .route-check');
+        checkboxes.forEach(cb => cb.checked = source.checked);
+    }
+
+    function openBulkDayModal(merch) {
+        var tableId = 'table-' + merch.toLowerCase().replace(/[^a-z0-9]/g, '-');
+        var checkboxes = document.querySelectorAll('#' + tableId + ' .route-check:checked');
+        
+        if (checkboxes.length === 0) {
+            alert("Lütfen en az bir mağaza seçiniz.");
+            return;
+        }
+
+        var container = document.getElementById('selectedRoutesContainer');
+        container.innerHTML = '';
+        checkboxes.forEach(cb => {
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'selected_routes';
+            input.value = cb.value;
+            container.appendChild(input);
+        });
+
+        new bootstrap.Modal(document.getElementById('bulkDayModal')).show();
+    }
+
+    function openAddStoreModal(merch) {
+        document.getElementById('addStoreMerch').value = merch;
+        document.getElementById('customerSearchInput').value = '';
+        document.getElementById('searchResults').style.display = 'none';
+        document.getElementById('selectedCustomerDisplay').classList.add('d-none');
+        document.getElementById('selectedCustId').value = '';
+        new bootstrap.Modal(document.getElementById('addStoreModal')).show();
+    }
+
+    let searchTimeout;
+    function searchCustomers() {
+        clearTimeout(searchTimeout);
+        var query = document.getElementById('customerSearchInput').value;
+        var resultsDiv = document.getElementById('searchResults');
+        
+        if (query.length < 2) { resultsDiv.style.display = 'none'; return; }
+
+        searchTimeout = setTimeout(() => {
+            fetch(`{% url 'search_customer_api' %}?q=${encodeURIComponent(query)}`)
+                .then(res => res.json())
+                .then(data => {
+                    resultsDiv.innerHTML = '';
+                    if (data.length > 0) {
+                        resultsDiv.style.display = 'block';
+                        data.forEach(cust => {
+                            var item = document.createElement('a');
+                            item.className = 'list-group-item list-group-item-action';
+                            item.innerHTML = `<strong>${cust.name}</strong> <small class='text-muted'>(${cust.code})</small><br><small>${cust.district}</small>`;
+                            item.href = '#';
+                            item.onclick = function(e) {
+                                e.preventDefault();
+                                selectCustomer(cust);
+                            };
+                            resultsDiv.appendChild(item);
+                        });
+                    } else { resultsDiv.style.display = 'none'; }
+                });
+        }, 300);
+    }
+
+    function selectCustomer(cust) {
+        document.getElementById('selectedCustId').value = cust.id;
+        document.getElementById('selectedCustName').innerText = cust.name;
+        document.getElementById('selectedCustomerDisplay').classList.remove('d-none');
+        document.getElementById('searchResults').style.display = 'none';
+        document.getElementById('customerSearchInput').value = cust.name;
+    }
+</script>
+{% endblock %}

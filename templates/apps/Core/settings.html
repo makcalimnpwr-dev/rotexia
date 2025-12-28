@@ -1,0 +1,103 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container-fluid">
+    
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3 class="fw-bold text-dark">Sistem Yapılandırması</h3>
+        <div>
+            <a href="?reset=true" class="btn btn-outline-danger me-2">
+                <i class="fas fa-sync-alt"></i> Ayarları Sıfırla
+            </a>
+            <button type="submit" form="settingsForm" class="btn btn-primary px-4">
+                <i class="fas fa-save me-2"></i> Kaydet
+            </button>
+        </div>
+    </div>
+
+    <form method="post" id="settingsForm">
+        {% csrf_token %}
+        
+        <div class="row">
+            <div class="col-md-3 mb-4">
+                <div class="list-group sticky-top" style="top: 100px;">
+                    <a href="#general" class="list-group-item list-group-item-action active fw-bold py-3" data-bs-toggle="list">Genel Ayarlar</a>
+                    <a href="#visit" class="list-group-item list-group-item-action fw-bold py-3" data-bs-toggle="list">Ziyaret & Konum</a>
+                    <a href="#user" class="list-group-item list-group-item-action fw-bold py-3" data-bs-toggle="list">Kullanıcı & Personel</a>
+                </div>
+            </div>
+
+            <div class="col-md-9">
+                <div class="tab-content">
+                    
+                    <div class="tab-pane fade show active" id="general">
+                        <div class="card shadow-sm border-0">
+                            <div class="card-header bg-dark text-white fw-bold">Genel Ayarlar</div>
+                            <div class="card-body">
+                                {% for setting in settings_general %}
+                                    <div class="mb-3 border-bottom pb-3">
+                                        <label class="fw-bold d-block">{{ setting.label }}</label>
+                                        {% if setting.input_type == 'bool' %}
+                                            <div class="form-check form-switch">
+                                                <input class="form-check-input" type="checkbox" name="{{ setting.key }}" style="width: 3em; height: 1.5em;" {% if setting.value == 'True' %}checked{% endif %}>
+                                                <small class="ms-2 text-muted">{{ setting.description }}</small>
+                                            </div>
+                                        {% else %}
+                                            <input type="{{ setting.input_type }}" name="{{ setting.key }}" class="form-control" value="{{ setting.value }}" style="max-width: 300px;">
+                                            <small class="text-muted">{{ setting.description }}</small>
+                                        {% endif %}
+                                    </div>
+                                {% empty %}
+                                    <div class="alert alert-warning">Veri yok! Lütfen yukarıdaki 'Ayarları Sıfırla' butonuna basın.</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="visit">
+                        <div class="card shadow-sm border-0">
+                            <div class="card-header bg-warning text-dark fw-bold">Ziyaret & Konum Ayarları</div>
+                            <div class="card-body">
+                                {% for setting in settings_visit %}
+                                    <div class="mb-3 border-bottom pb-3">
+                                        <label class="fw-bold d-block">{{ setting.label }}</label>
+                                        {% if setting.input_type == 'bool' %}
+                                            <div class="form-check form-switch">
+                                                <input class="form-check-input" type="checkbox" name="{{ setting.key }}" style="width: 3em; height: 1.5em;" {% if setting.value == 'True' %}checked{% endif %}>
+                                                <small class="ms-2 text-muted">{{ setting.description }}</small>
+                                            </div>
+                                        {% else %}
+                                            <input type="{{ setting.input_type }}" name="{{ setting.key }}" class="form-control" value="{{ setting.value }}" style="max-width: 300px;">
+                                            <small class="text-muted">{{ setting.description }}</small>
+                                        {% endif %}
+                                    </div>
+                                {% empty %}
+                                    <div class="alert alert-warning">Veri yok! Lütfen yukarıdaki 'Ayarları Sıfırla' butonuna basın.</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="user">
+                        <div class="card shadow-sm border-0">
+                            <div class="card-header bg-info text-white fw-bold">Personel Ayarları</div>
+                            <div class="card-body">
+                                {% for setting in settings_user %}
+                                    <div class="mb-3 border-bottom pb-3">
+                                        <label class="fw-bold d-block">{{ setting.label }}</label>
+                                        <input type="text" name="{{ setting.key }}" class="form-control" value="{{ setting.value }}">
+                                        <small class="text-muted">{{ setting.description }}</small>
+                                    </div>
+                                {% empty %}
+                                    <div class="alert alert-warning">Veri yok! Lütfen yukarıdaki 'Ayarları Sıfırla' butonuna basın.</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}

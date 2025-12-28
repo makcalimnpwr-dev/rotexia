@@ -1,0 +1,214 @@
+{% extends 'base.html' %}
+{% load custom_tags %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="m-0">Anket Raporu: {{ survey.title }}</h2>
+    <div class="text-muted small">Önizleme (max {{ preview_limit }} satır). Toplam kayıt: <strong>{{ total_count }}</strong></div>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="{% url 'survey_reports_home' %}">
+      <i class="fas fa-arrow-left"></i> Anket Raporları
+    </a>
+    <form method="post" action="{% url 'report_move_to_trash' report_id %}">
+      {% csrf_token %}
+      <button class="btn btn-outline-danger" type="submit" onclick="return confirm('Rapor çöp kutusuna taşınsın mı?');">
+        <i class="fas fa-trash"></i> Sil
+      </button>
+    </form>
+    <a class="btn btn-success" href="{% url 'survey_report_export' survey.id %}?{{ request.GET.urlencode }}">
+      <i class="fas fa-file-excel"></i> İndir
+    </a>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <form method="get" id="filtersForm" class="row g-3 align-items-end">
+      <input type="hidden" name="cols" id="colsInput" value="{{ selected_cols|join:',' }}">
+
+      <div class="col-md-3">
+        <label class="form-label fw-bold small">Başlangıç Tarihi</label>
+        <input type="date" class="form-control" name="start_date" value="{{ start_date|date:'Y-m-d' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-bold small">Bitiş Tarihi</label>
+        <input type="date" class="form-control" name="end_date" value="{{ end_date|date:'Y-m-d' }}">
+      </div>
+
+      <div class="col-md-3">
+        <button type="button" class="btn btn-outline-primary w-100" data-bs-toggle="modal" data-bs-target="#colsModal">
+          <i class="fas fa-columns"></i> Sütunları Ayarla
+        </button>
+      </div>
+
+      <div class="col-md-3 d-grid">
+        <button type="submit" class="btn btn-dark">
+          <i class="fas fa-filter"></i> Uygula
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          {% for h in headers %}
+            <th>{{ h.label }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            {% for h in headers %}
+              <td>{{ r|get_item:h.key }}</td>
+            {% endfor %}
+          </tr>
+        {% empty %}
+          <tr><td colspan="{{ headers|length }}" class="text-center text-muted py-5">Kayıt bulunamadı.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Columns modal -->
+<div class="modal fade" id="colsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Sütunları Seç</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-md-7">
+            <div class="text-muted small mb-2">Sütunlar (seçim sırası rapor sırasıdır)</div>
+            <div class="list-group" id="colsList">
+              {% for c in columns %}
+                <label class="list-group-item d-flex justify-content-between align-items-center">
+                  <span>
+                    <input class="form-check-input me-2 col-check" type="checkbox" data-key="{{ c.key }}">
+                    <span class="fw-bold">{{ c.label }}</span>
+                    <span class="text-muted small ms-2">({{ c.group }})</span>
+                  </span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div class="col-md-5">
+            <div class="text-muted small mb-2">Seçilen Sütunlar (sıra)</div>
+            <div class="list-group" id="selectedList"></div>
+            <div class="text-muted small mt-2">
+              İpucu: seçtiklerin sırayla eklenir. İstersen yukarı/aşağı ile sıralayabilirsin.
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Kapat</button>
+        <button class="btn btn-primary" type="button" onclick="applyColumns()">Uygula</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const selected = new Map(); // key -> label
+
+  function renderSelected() {
+    const box = document.getElementById('selectedList');
+    box.innerHTML = '';
+    const keys = Array.from(selected.keys());
+    keys.forEach((k, idx) => {
+      const el = document.createElement('div');
+      el.className = 'list-group-item d-flex justify-content-between align-items-center';
+      el.innerHTML = `
+        <div class="small fw-bold">${selected.get(k)}</div>
+        <div class="btn-group btn-group-sm">
+          <button class="btn btn-light" ${idx === 0 ? 'disabled' : ''} onclick="moveUp('${k}')"><i class="fas fa-chevron-up"></i></button>
+          <button class="btn btn-light" ${idx === keys.length - 1 ? 'disabled' : ''} onclick="moveDown('${k}')"><i class="fas fa-chevron-down"></i></button>
+          <button class="btn btn-light text-danger" onclick="removeCol('${k}')"><i class="fas fa-times"></i></button>
+        </div>
+      `;
+      box.appendChild(el);
+    });
+  }
+
+  function moveUp(key) {
+    const keys = Array.from(selected.keys());
+    const i = keys.indexOf(key);
+    if (i <= 0) return;
+    const newKeys = keys.slice();
+    [newKeys[i-1], newKeys[i]] = [newKeys[i], newKeys[i-1]];
+    const newMap = new Map();
+    newKeys.forEach(k => newMap.set(k, selected.get(k)));
+    selected.clear();
+    newMap.forEach((v, k) => selected.set(k, v));
+    renderSelected();
+  }
+
+  function moveDown(key) {
+    const keys = Array.from(selected.keys());
+    const i = keys.indexOf(key);
+    if (i < 0 || i >= keys.length - 1) return;
+    const newKeys = keys.slice();
+    [newKeys[i], newKeys[i+1]] = [newKeys[i+1], newKeys[i]];
+    const newMap = new Map();
+    newKeys.forEach(k => newMap.set(k, selected.get(k)));
+    selected.clear();
+    newMap.forEach((v, k) => selected.set(k, v));
+    renderSelected();
+  }
+
+  function removeCol(key) {
+    selected.delete(key);
+    document.querySelectorAll('.col-check').forEach(ch => {
+      if (ch.dataset.key === key) ch.checked = false;
+    });
+    renderSelected();
+  }
+
+  function applyColumns() {
+    const keys = Array.from(selected.keys());
+    document.getElementById('colsInput').value = keys.join(',');
+    document.getElementById('filtersForm').requestSubmit();
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    const initial = (document.getElementById('colsInput').value || '').split(',').filter(Boolean);
+    const labelByKey = {};
+    document.querySelectorAll('.col-check').forEach(ch => {
+      const labelEl = ch.parentElement.querySelector('.fw-bold');
+      labelByKey[ch.dataset.key] = labelEl ? labelEl.textContent.trim() : ch.dataset.key;
+    });
+
+    initial.forEach(k => {
+      if (labelByKey[k]) selected.set(k, labelByKey[k]);
+    });
+
+    document.querySelectorAll('.col-check').forEach(ch => {
+      if (selected.has(ch.dataset.key)) ch.checked = true;
+      ch.addEventListener('change', function() {
+        const key = ch.dataset.key;
+        if (ch.checked) {
+          if (!selected.has(key)) selected.set(key, labelByKey[key] || key);
+        } else {
+          selected.delete(key);
+        }
+        renderSelected();
+      });
+    });
+
+    renderSelected();
+  });
+</script>
+{% endblock %}
+
+

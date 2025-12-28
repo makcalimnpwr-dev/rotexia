@@ -1,0 +1,246 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Giriş Yap | Rotexia</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+
+    <style>
+        /* GİRİŞ EKRANI ÖZEL TASARIMI */
+        body {
+            background-color: #151521; /* Çok koyu lacivert/siyah */
+            font-family: 'Inter', sans-serif;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        /* Arka Plan Süslemesi (Flu Işıklar) */
+        .bg-glow {
+            position: absolute;
+            width: 300px;
+            height: 300px;
+            background: #0d6efd;
+            filter: blur(150px);
+            opacity: 0.2;
+            border-radius: 50%;
+            z-index: 0;
+        }
+        .glow-1 { top: -100px; left: -100px; }
+        .glow-2 { bottom: -100px; right: -100px; background: #6610f2; }
+
+        /* Giriş Kartı */
+        .login-card {
+            width: 100%;
+            max-width: 400px;
+            padding: 40px 30px;
+            position: relative;
+            z-index: 1;
+            /* Cam Efekti (Glassmorphism) yok, temiz koyu kart */
+            background: transparent; 
+        }
+
+        /* Logo Alanı */
+        .brand-area {
+            text-align: center;
+            margin-bottom: 50px;
+            animation: fadeInDown 0.8s ease;
+        }
+        .logo-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 18px;
+            margin-bottom: 10px;
+        }
+        .logo-rx {
+            width: 70px;
+            height: 70px;
+        }
+        .logo-text {
+            font-size: 38px;
+            font-weight: 700;
+            color: #ffffff;
+            letter-spacing: -1px;
+            font-family: 'Inter', 'Arial', sans-serif;
+            text-shadow: 0 2px 10px rgba(139, 92, 246, 0.3);
+        }
+
+        /* Form Alanları */
+        .form-group {
+            margin-bottom: 20px;
+            animation: fadeInUp 1s ease;
+        }
+        
+        .custom-input {
+            background-color: #1e1e2d;
+            border: 1px solid #2d2d3f;
+            color: white;
+            height: 55px;
+            border-radius: 12px;
+            padding-left: 45px; /* İkon boşluğu */
+            font-size: 15px;
+            transition: 0.3s;
+        }
+        .custom-input:focus {
+            background-color: #252536;
+            border-color: #0d6efd;
+            color: white;
+            box-shadow: 0 0 0 4px rgba(13, 110, 253, 0.15);
+        }
+        .custom-input::placeholder { color: #6c757d; }
+
+        /* İkonlar */
+        .input-icon {
+            position: absolute;
+            left: 15px;
+            top: 55px; /* Label'dan sonraki boşluk */
+            color: #6c757d;
+            font-size: 18px;
+            margin-top: 2px;
+        }
+        
+        /* Label Gizleme (Placeholder yeterli) ama yapısal kalsın */
+        label { display: none; }
+
+        /* Giriş Butonu */
+        .btn-login {
+            width: 100%;
+            height: 55px;
+            background: #0d6efd;
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-weight: 700;
+            font-size: 16px;
+            margin-top: 10px;
+            transition: 0.3s;
+            box-shadow: 0 4px 15px rgba(13, 110, 253, 0.3);
+            animation: fadeInUp 1.2s ease;
+        }
+        .btn-login:active {
+            transform: scale(0.98);
+            box-shadow: none;
+        }
+
+        /* Alt Metinler */
+        .footer-text {
+            text-align: center;
+            margin-top: 30px;
+            color: #6c757d;
+            font-size: 12px;
+            animation: fadeIn 1.5s ease;
+        }
+
+        /* Animasyonlar */
+        @keyframes fadeInDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    </style>
+</head>
+<body>
+
+    <div class="bg-glow glow-1"></div>
+    <div class="bg-glow glow-2"></div>
+
+    <div class="login-card">
+        
+        <div class="brand-area">
+            <div class="logo-container">
+                <!-- Rx Symbol - Modern ve keskin kenarlı -->
+                <svg class="logo-rx" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+                    <defs>
+                        <linearGradient id="rGradientLogin" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color:#4C1D95;stop-opacity:1" />
+                            <stop offset="50%" style="stop-color:#6B46C1;stop-opacity:1" />
+                            <stop offset="100%" style="stop-color:#8B5CF6;stop-opacity:1" />
+                        </linearGradient>
+                        <filter id="glow">
+                            <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+                            <feMerge>
+                                <feMergeNode in="coloredBlur"/>
+                                <feMergeNode in="SourceGraphic"/>
+                            </feMerge>
+                        </filter>
+                    </defs>
+                    <!-- R harfi - Modern, keskin kenarlı -->
+                    <path d="M 8 8 L 8 72 L 45 72 Q 58 72 58 55 Q 58 42 48 36 L 58 8 L 45 8 L 32 24 L 45 24 Q 52 24 52 36 Q 52 55 45 55 L 20 55 L 20 8 Z" 
+                          fill="url(#rGradientLogin)" 
+                          stroke="none"
+                          filter="url(#glow)"/>
+                    <!-- x harfi - Açılı ve modern -->
+                    <path d="M 68 8 L 60 18 L 75 40 L 60 62 L 68 72 L 88 45 L 108 72 L 116 62 L 101 40 L 116 18 L 108 8 L 88 35 Z" 
+                          fill="#8B5CF6" 
+                          stroke="none"
+                          filter="url(#glow)"/>
+                </svg>
+                <!-- Rotexia Text - Beyaz ve modern -->
+                <span class="logo-text">Rotexia</span>
+            </div>
+        </div>
+
+        <form method="post">
+            {% csrf_token %}
+            
+            {% if form.errors %}
+                <div class="alert alert-danger py-2 small rounded-3 border-0 bg-danger bg-opacity-10 text-danger mb-4">
+                    <i class="fas fa-exclamation-circle me-1"></i> Kullanıcı adı veya şifre hatalı.
+                </div>
+            {% endif %}
+
+            <div class="form-group position-relative">
+                <i class="fas fa-user input-icon" style="top: 18px;"></i>
+                <input type="text" name="username" class="form-control custom-input" placeholder="Kullanıcı Adı" required autofocus autocomplete="off">
+            </div>
+
+            <div class="form-group position-relative">
+                <i class="fas fa-lock input-icon" style="top: 18px;"></i>
+                <input type="password" name="password" class="form-control custom-input" placeholder="Şifre" required>
+            </div>
+
+            <button type="submit" class="btn btn-login">
+                Giriş Yap <i class="fas fa-arrow-right ms-2"></i>
+            </button>
+
+        </form>
+
+        <div class="footer-text">
+            &copy; 2025 Rotexia v1.2<br>
+            Güvenli Mobil Bağlantı
+        </div>
+
+    </div>
+    
+<script>
+    // Sayfa yüklendiğinde çalışır
+    document.addEventListener("DOMContentLoaded", function() {
+        // Eğer ekran genişliği 768px'den küçükse (Telefonsa)
+        if (window.innerWidth < 768) {
+            // Formu bul
+            var form = document.querySelector('form');
+            
+            // Eğer URL'de zaten bir yönlendirme yoksa
+            if (!window.location.search.includes('next=')) {
+                // Gizli bir input oluştur ve "next" parametresi olarak "/app/" gönder
+                var input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'next';
+                input.value = '/app/';
+                form.appendChild(input);
+            }
+        }
+    });
+</script>
+
+</body> </html>
+
+</body>
+</html>

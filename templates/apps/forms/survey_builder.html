@@ -1,0 +1,403 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h3 class="fw-bold"><i class="fas fa-clipboard-check text-primary"></i> <span id="headerTitle">{{ survey.title }}</span></h3>
+        <span class="badge {% if survey.is_active %}bg-success{% else %}bg-secondary{% endif %}">
+            {% if survey.is_active %}Yayında{% else %}Taslak{% endif %}
+        </span>
+    </div>
+    <div class="d-flex gap-2">
+        <button class="btn btn-success fw-bold shadow-sm" onclick="saveSettings()">
+            <i class="fas fa-save"></i> Tüm Ayarları Kaydet
+        </button>
+        <a href="{% url 'survey_list' %}" class="btn btn-secondary shadow-sm">Çıkış</a>
+    </div>
+</div>
+
+<ul class="nav nav-tabs mb-4" id="builderTabs" role="tablist">
+    <li class="nav-item">
+        <button class="nav-link active fw-bold" id="questions-tab" data-bs-toggle="tab" data-bs-target="#panel-questions" type="button">
+            <i class="fas fa-list-ol"></i> Sorular & Akış
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link fw-bold text-dark" id="settings-tab" data-bs-toggle="tab" data-bs-target="#panel-settings" type="button">
+            <i class="fas fa-sliders-h"></i> Form Ayarları & Hedefleme
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content">
+    
+    <div class="tab-pane fade show active" id="panel-questions">
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card shadow-sm border-0 mb-3 bg-light">
+                    <div class="card-body">
+                        <h6 class="fw-bold text-primary mb-3">Yeni Soru Ekle</h6>
+                        <form id="addQuestionForm">
+                            <input type="hidden" name="survey_id" value="{{ survey.id }}">
+                            <div class="mb-2">
+                                <label class="small fw-bold">Soru Tipi</label>
+                                <select name="type" class="form-select">
+                                    <option value="text">Kısa Metin</option>
+                                    <option value="select">Seçmeli (Evet/Hayır)</option>
+                                    <option value="photo">Fotoğraf</option>
+                                    <option value="date">Tarih</option>
+                                    <option value="number">Sayı</option>
+                                    <option value="location">Konum</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="small fw-bold">Soru Metni</label>
+                                <input type="text" name="label" class="form-control" placeholder="Örn: Mağazada stant var mı?" required>
+                            </div>
+                            <button type="button" onclick="addQuestion()" class="btn btn-primary w-100 btn-sm fw-bold">
+                                <i class="fas fa-plus"></i> Listeye Ekle
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                <div class="alert alert-info small shadow-sm">
+                    <i class="fas fa-lightbulb text-warning"></i> "Seçmeli" tipini seçerek kullanıcıya <strong>Evet/Hayır</strong> gibi standart cevaplar sunabilirsiniz. Seçenekleri ekledikten sonra sağdaki listeden <strong>Düzenle</strong> butonunu kullanın.
+                </div>
+            </div>
+
+            <div class="col-md-8">
+                <div class="card shadow-sm border-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Sıra</th>
+                                    <th>Soru Detayı</th>
+                                    <th>Tip</th>
+                                    <th class="text-end">İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for q in questions %}
+                                <tr class="{% if q.parent_question %}table-warning bg-opacity-10{% endif %}">
+                                    <td class="text-center fw-bold text-muted">{{ q.order }}</td>
+                                    <td>
+                                        <div class="card mb-3 shadow-sm border-start border-4 {% if question.dependency_question %}border-warning{% else %}border-primary{% endif %}" id="question-card-{{ question.id }}">
+                                            <div class="card-body">
+        
+                                                {% if question.dependency_question %}
+                                                <div class="alert alert-warning d-flex align-items-center p-2 mb-3" role="alert" style="font-size: 0.9rem;">
+                                                    <i class="bi bi-diagram-3-fill me-2"></i>
+                                                    <div>
+                                                        Bu soru, <strong>"{{ question.dependency_question.text }}"</strong> sorusuna 
+                                                        <strong>"{{ question.dependency_value }}"</strong> cevabı verilirse aktif olur.
+                                                    </div>
+                                                </div>
+                                {% endif %}
+
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <h5 class="card-title mb-0 fw-bold text-dark">
+                                        <span class="badge bg-light text-dark border me-2">{{ forloop.counter }}</span>
+                                        {{ question.text }}
+                                        {% if question.required %}<span class="text-danger">*</span>{% endif %}
+                                    </h5>
+                                    <span class="badge bg-secondary">{{ question.get_question_type_display }}</span>
+                                </div>
+
+                                <div class="ps-4 mt-3">
+                                    {% if question.question_type == 'select' or question.question_type == 'radio' or question.question_type == 'checkbox' %}
+                                        <h6 class="text-muted text-uppercase small fw-bold">Seçenekler:</h6>
+                                        <ul class="list-group list-group-flush border-start ps-3">
+                                            {% for choice in question.choices.all %}
+                                                <li class="list-group-item py-1 border-0 bg-transparent text-muted">
+                                                    <i class="bi bi-circle me-2 small"></i> {{ choice.text }}
+                                                </li>
+                                            {% empty %}
+                                                <li class="text-muted fst-italic small">Henüz seçenek eklenmemiş.</li>
+                                            {% endfor %}
+                                        </ul>
+            
+                                    {% elif question.question_type == 'boolean' %}
+                                        <div class="btn-group btn-group-sm" role="group">
+                                            <button type="button" class="btn btn-outline-success">Evet</button>
+                                            <button type="button" class="btn btn-outline-danger">Hayır</button>
+                                        </div>
+            
+                                    {% elif question.question_type == 'photo' %}
+                                        <div class="border rounded p-3 text-center text-muted bg-light">
+                                            <i class="bi bi-camera fs-4 d-block mb-1"></i>
+                                            Fotoğraf Yükleme Alanı
+                                        </div>
+
+                                    {% else %}
+                                        <input type="text" class="form-control form-control-sm" disabled placeholder="Metin girişi...">
+                                    {% endif %}
+                                </div>
+
+                                <div class="d-flex justify-content-end mt-3 border-top pt-2">
+                                    <a href="{% url 'forms:question_edit' form.id question.id %}" class="btn btn-sm btn-outline-primary me-2">
+                                        <i class="bi bi-pencil"></i> Düzenle
+                                    </a>
+                                    <a href="{% url 'forms:question_delete' form.id question.id %}" class="btn btn-sm btn-outline-danger">
+                                        <i class="bi bi-trash"></i> Sil
+                                    </a>
+                                </div>
+
+                            </div>
+                        </div>
+                                    </td>
+                                    <td><span class="badge bg-light text-dark border">{{ q.get_question_type_display }}</span></td>
+                                    <td class="text-end">
+                                        <button class="btn btn-sm btn-outline-primary" onclick="openEditModal('{{ q.id }}')">
+                                            <i class="fas fa-pen"></i> Düzenle
+                                        </button>
+                                        <a href="{% url 'delete_question' q.id %}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Silmek istediğine emin misin?')"><i class="fas fa-trash"></i></a>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr><td colspan="4" class="text-center text-muted py-4">Henüz soru eklenmemiş.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tab-pane fade" id="panel-settings">
+        <form id="settingsForm">
+            <input type="hidden" name="survey_id" value="{{ survey.id }}">
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="card shadow-sm border-0 mb-3">
+                        <div class="card-header bg-white fw-bold text-primary"><i class="fas fa-calendar-alt"></i> Zamanlama</div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Form Başlığı</label>
+                                <input type="text" name="title" class="form-control" value="{{ survey.title }}" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Açıklama</label>
+                                <textarea name="description" class="form-control" rows="2">{{ survey.description|default:'' }}</textarea>
+                            </div>
+                            
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label fw-bold">Başlangıç <span class="text-danger">*</span></label>
+                                    <input type="date" name="start_date" class="form-control" value="{{ survey.start_date|date:'Y-m-d' }}" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label fw-bold">Bitiş (Opsiyonel)</label>
+                                    <input type="date" name="end_date" class="form-control" value="{{ survey.end_date|date:'Y-m-d'|default:'' }}">
+                                </div>
+                            </div>
+
+                            <div class="form-check form-switch bg-light p-3 rounded border">
+                                <input class="form-check-input" type="checkbox" name="is_active" id="activeCheck" {% if survey.is_active %}checked{% endif %}>
+                                <label class="form-check-label fw-bold" for="activeCheck">Bu Form Aktif (Sahada Görünsün)</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card shadow-sm border-0 mb-3">
+                        <div class="card-header bg-white fw-bold text-danger"><i class="fas fa-history"></i> Doldurma Sıklığı</div>
+                        <div class="card-body">
+                            <label class="form-label small text-muted">Personel bu formu ne zaman görecek?</label>
+                            <select name="frequency_type" class="form-select mb-3" onchange="toggleDays(this.value)">
+                                {% for code, name in frequency_choices %}
+                                <option value="{{ code }}" {% if survey.frequency_type == code %}selected{% endif %}>{{ name }}</option>
+                                {% endfor %}
+                            </select>
+
+                            <div id="specificDaysArea" class="border p-2 rounded bg-light {% if survey.frequency_type != 'specific_days' %}d-none{% endif %}">
+                                <label class="small fw-bold mb-2">Günleri Seçin:</label><br>
+                                <div class="btn-group flex-wrap" role="group">
+                                    {% for d_code, d_name in days_choices %}
+                                    <input type="checkbox" class="btn-check" name="specific_days" value="{{ d_code }}" id="day_{{ d_code }}" 
+                                        {% if d_code in survey.active_days %}checked{% endif %}>
+                                    <label class="btn btn-outline-primary btn-sm mb-1" for="day_{{ d_code }}">{{ d_name }}</label>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-6">
+                    <div class="card shadow-sm border-0 mb-3 h-100">
+                        <div class="card-header bg-white fw-bold text-success"><i class="fas fa-bullseye"></i> Hedefleme & Filtreler</div>
+                        <div class="card-body">
+                            <div class="alert alert-light border small">
+                                <i class="fas fa-info-circle"></i> Seçim yapmazsanız form <strong>HERKES</strong> için geçerli olur.
+                            </div>
+                            
+                            <div class="mb-4">
+                                <label class="fw-bold mb-2">1. Kullanıcı Rolü Filtresi</label>
+                                <div class="border rounded p-2 bg-white" style="max-height: 150px; overflow-y: auto;">
+                                    {% for role in all_roles %}
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" name="target_roles" value="{{ role.id }}" id="role_{{ role.id }}"
+                                            {% if role.id in selected_roles %}checked{% endif %}>
+                                        <label class="form-check-label" for="role_{{ role.id }}">
+                                            {{ role.name }}
+                                        </label>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="fw-bold mb-2">2. Müşteri/Cari Filtresi</label>
+                                <div class="border rounded p-2 bg-white" style="max-height: 200px; overflow-y: auto;">
+                                    {% for cari in all_caris %}
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" name="target_caris" value="{{ cari.id }}" id="cari_{{ cari.id }}"
+                                            {% if cari.id in selected_caris %}checked{% endif %}>
+                                        <label class="form-check-label" for="cari_{{ cari.id }}">
+                                            {{ cari.name }}
+                                        </label>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="modal fade" id="editModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title">Soruyu Yapılandır</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <ul class="nav nav-tabs mb-3">
+                    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-general">Genel</button></li>
+                    <li class="nav-item"><button class="nav-link text-danger fw-bold" data-bs-toggle="tab" data-bs-target="#tab-logic">Mantık (Logic)</button></li>
+                </ul>
+                <div class="tab-content">
+                    <div class="tab-pane fade show active" id="tab-general">
+                        <form id="optionsForm">
+                            <input type="hidden" name="question_id" id="editQId">
+                            <div class="mb-3"><label class="form-label fw-bold">Soru Metni</label><input type="text" name="label" id="editLabel" class="form-control" required></div>
+                            <div class="form-check mb-3"><input class="form-check-input" type="checkbox" name="required" id="editRequired"><label class="form-check-label">Zorunlu Alan</label></div>
+                            <div id="optionsArea" style="display:none;" class="p-3 bg-light border rounded">
+                                <label class="form-label fw-bold text-primary">Seçenekler (Her satıra bir tane)</label>
+                                <textarea id="optionsInput" class="form-control" rows="4"></textarea>
+                                <div class="form-text">Örn:<br>Evet<br>Hayır</div>
+                            </div>
+                        </form>
+                        <div class="text-end mt-3"><button type="button" onclick="saveOptions()" class="btn btn-primary fw-bold">Kaydet</button></div>
+                    </div>
+                    <div class="tab-pane fade" id="tab-logic">
+                        <div class="alert alert-warning small"><i class="fas fa-random"></i> Bu soru, başka bir sorunun cevabına göre mi gösterilecek?</div>
+                        <form id="logicForm">
+                            <input type="hidden" name="question_id" id="logicQId">
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Hangi soruya bağlı?</label>
+                                <select name="parent_id" id="parentSelect" class="form-select"></select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Hangi cevap seçilince gösterilsin?</label>
+                                <input type="text" name="trigger_value" id="triggerVal" class="form-control" placeholder="Örn: Evet">
+                            </div>
+                        </form>
+                        <div class="text-end mt-3"><button type="button" onclick="saveLogic()" class="btn btn-danger text-white fw-bold">Mantığı Kaydet</button></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // GÜN GİZLE/GÖSTER (CSS Class ile yapıldı, hata vermez)
+    function toggleDays(val) {
+        var area = document.getElementById('specificDaysArea');
+        if(val === 'specific_days') {
+            area.classList.remove('d-none');
+        } else {
+            area.classList.add('d-none');
+        }
+    }
+
+    // AYARLARI KAYDET
+    function saveSettings() {
+        var form = document.getElementById('settingsForm');
+        var formData = new FormData(form);
+        formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+        fetch("{% url 'save_survey_settings' %}", {method: 'POST', body: formData})
+        .then(r => r.json())
+        .then(data => {
+            if(data.status === 'success') {
+                alert("Ayarlar başarıyla kaydedildi.");
+                document.getElementById('headerTitle').innerText = formData.get('title');
+            } else {
+                alert("Hata: " + data.msg);
+            }
+        });
+    }
+
+    // SORU EKLEME
+    function addQuestion() {
+        var form = document.getElementById('addQuestionForm');
+        var formData = new FormData(form);
+        formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+        fetch("{% url 'add_question_api' %}", {method: 'POST', body: formData})
+        .then(r => r.json()).then(data => { if(data.status === 'success') location.reload(); else alert(data.msg); });
+    }
+
+    // DÜZENLEME PENCERESİ AÇ
+    function openEditModal(id) {
+        document.getElementById('editQId').value = id;
+        document.getElementById('logicQId').value = id;
+        fetch("/forms/builder/get-question/" + id + "/").then(r => r.json()).then(data => {
+            document.getElementById('editLabel').value = data.label;
+            document.getElementById('editRequired').checked = data.required;
+            
+            var optsArea = document.getElementById('optionsArea');
+            if (data.type_code === 'select' || data.type_code === 'multi_select') {
+                optsArea.style.display = 'block';
+                var txt = "";
+                data.options.forEach(o => { txt += o.text + "\n"; });
+                document.getElementById('optionsInput').value = txt;
+            } else { optsArea.style.display = 'none'; }
+
+            var parentSel = document.getElementById('parentSelect');
+            parentSel.innerHTML = '<option value="">-- Hiçbiri (Her zaman göster) --</option>';
+            data.potential_parents.forEach(p => {
+                var selected = (p.id == data.parent_id) ? 'selected' : '';
+                parentSel.innerHTML += `<option value="${p.id}" ${selected}>${p.label}</option>`;
+            });
+            document.getElementById('triggerVal').value = data.visible_if;
+            new bootstrap.Modal(document.getElementById('editModal')).show();
+        });
+    }
+
+    function saveOptions() {
+        var form = new FormData();
+        form.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+        form.append('question_id', document.getElementById('editQId').value);
+        form.append('label', document.getElementById('editLabel').value);
+        form.append('required', document.getElementById('editRequired').checked ? 'on' : 'off');
+        var rawOpts = document.getElementById('optionsInput').value.split('\n');
+        var cleanOpts = rawOpts.filter(e => e.trim() !== "");
+        form.append('options_list', JSON.stringify(cleanOpts));
+        fetch("{% url 'save_question_options' %}", {method: 'POST', body: form}).then(r => r.json()).then(data => location.reload());
+    }
+
+    function saveLogic() {
+        var form = new FormData(document.getElementById('logicForm'));
+        form.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+        fetch("{% url 'save_question_logic' %}", {method: 'POST', body: form}).then(r => r.json()).then(data => location.reload());
+    }
+</script>
+{% endblock %}

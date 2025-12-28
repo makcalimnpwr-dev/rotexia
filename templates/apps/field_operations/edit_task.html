@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow border-0">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                <h5 class="m-0 fw-bold text-primary">Görevi Düzenle</h5>
+                <a href="{% url 'task_list' %}" class="btn btn-sm btn-light">Listeye Dön</a>
+            </div>
+            
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="save">
+
+                    <div class="mb-3">
+                        <label class="form-label text-muted small fw-bold">Müşteri</label>
+                        <input type="text" class="form-control bg-light" value="{{ task.customer.name }} ({{ task.customer.customer_code }})" readonly>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Atanan Personel</label>
+                            <input type="text" name="merch_code" class="form-control" value="{{ task.merch_code }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Planlanan Tarih</label>
+                            <input type="date" name="planned_date" class="form-control" value="{{ task.planned_date|date:'Y-m-d' }}">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Durum</label>
+                        <select name="status" class="form-select">
+                            <option value="pending" {% if task.status == 'pending' %}selected{% endif %}>Bekliyor</option>
+                            <option value="completed" {% if task.status == 'completed' %}selected{% endif %}>Tamamlandı</option>
+                            <option value="missed" {% if task.status == 'missed' %}selected{% endif %}>Ziyaret Edilmedi</option>
+                            <option value="cancelled" {% if task.status == 'cancelled' %}selected{% endif %}>Pasife Alındı (İptal)</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Ziyaret Notu</label>
+                        <textarea name="visit_note" class="form-control" rows="3">{{ task.visit_note|default:'' }}</textarea>
+                    </div>
+
+                    <div class="d-grid gap-2 mb-3">
+                        <button type="submit" class="btn btn-primary">Değişiklikleri Kaydet</button>
+                    </div>
+                </form>
+
+                <hr>
+
+                <div class="d-flex gap-2 justify-content-end">
+                    <form method="post" style="display:inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="passive">
+                        <button type="submit" class="btn btn-warning text-dark" onclick="return confirm('Pasife almak istediğine emin misin?');">
+                            <i class="fas fa-ban"></i> Pasife Al
+                        </button>
+                    </form>
+
+                    <form method="post" style="display:inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="delete">
+                        <button type="submit" class="btn btn-danger" onclick="return confirm('Tamamen silmek istediğine emin misin?');">
+                            <i class="fas fa-trash"></i> Sil
+                        </button>
+                    </form>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

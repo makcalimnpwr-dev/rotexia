@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow border-0">
+            <div class="card-header bg-white py-3">
+                <h5 class="m-0 fw-bold text-secondary">Yeni Kullanıcı Ekle</h5>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Ad <span class="text-danger">*</span></label>
+                            <input type="text" name="first_name" class="form-control" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Soyad <span class="text-danger">*</span></label>
+                            <input type="text" name="last_name" class="form-control" required>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Kullanıcı Kodu <span class="text-danger">*</span></label>
+                        <input type="text" name="user_code" class="form-control" required placeholder="Örn: TR-001">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Şifre <span class="text-danger">*</span></label>
+                        <input type="password" name="password" class="form-control" required>
+                    </div>
+
+                    <hr>
+
+                    <div class="mb-3">
+                        <label class="form-label">Telefon (İsteğe Bağlı)</label>
+                        <input type="text" name="phone" class="form-control">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">E-posta (İsteğe Bağlı)</label>
+                        <input type="email" name="email" class="form-control">
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-danger">Kaydet</button>
+                        <a href="{% url 'user_list' %}" class="btn btn-light">İptal</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

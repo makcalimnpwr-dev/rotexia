@@ -1,0 +1,299 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+
+/* GENEL AYARLAR */
+body {
+    background-color: #f8f9fa;
+    font-family: 'Inter', sans-serif; /* Okunaklı modern font */
+    padding-bottom: 90px;
+    padding-top: 60px; /* Üst header için boşluk */
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* ÜST SABİT BAR (HEADER) */
+.mobile-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 60px;
+    background: #1e1e2d; /* Koyu tema */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    z-index: 1050;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    color: white;
+}
+
+.header-title {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+/* HAMBURGER MENÜ BUTONU */
+.btn-menu {
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 24px;
+    padding: 0;
+}
+
+/* SOL YAN MENÜ (SIDEBAR) */
+.offcanvas {
+    background-color: #1e1e2d;
+    color: white;
+}
+.offcanvas-header {
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.mobile-nav-link {
+    display: flex;
+    align-items: center;
+    padding: 15px 20px;
+    color: #a4a6b3;
+    text-decoration: none;
+    font-size: 16px;
+    transition: 0.2s;
+    border-left: 4px solid transparent;
+}
+.mobile-nav-link:hover, .mobile-nav-link.active {
+    background: rgba(255,255,255,0.05);
+    color: white;
+    border-left-color: #0d6efd;
+}
+.mobile-nav-link i {
+    width: 30px;
+    font-size: 18px;
+}
+
+/* HERO ALANI (YÜZDELİK KISIM) */
+.hero-card {
+    background: linear-gradient(145deg, #1e1e2d, #2d2d3f);
+    color: white;
+    border-radius: 24px;
+    padding: 25px;
+    margin: 15px 15px 30px 15px; /* Kenar boşlukları */
+    box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+    position: relative;
+    overflow: hidden;
+}
+
+/* YÜZDELİK DAİRE */
+.progress-ring {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: conic-gradient(#0d6efd var(--prog), rgba(255,255,255,0.1) 0deg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+    position: relative;
+}
+.progress-ring::after {
+    content: "";
+    position: absolute;
+    width: 100px; /* İç daire */
+    height: 100px;
+    background: #252536; /* Arkaplan rengiyle uyumlu */
+    border-radius: 50%;
+}
+.progress-text {
+    position: relative;
+    z-index: 2;
+    text-align: center;
+}
+.percent-val { 
+    font-size: 22px; 
+    font-weight: 800; 
+    line-height: 1; 
+    letter-spacing: -0.5px;
+}
+.percent-label { font-size: 10px; color: rgba(255,255,255,0.65); margin-top: 4px; }
+
+/* MOLA BUTONU */
+.btn-break-hero {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: white;
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.btn-break-hero.break-active {
+    background: rgba(220,53,69,0.18);
+    border-color: rgba(220,53,69,0.45);
+}
+.break-timer {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    color: rgba(255,255,255,0.9);
+    margin-right: 2px;
+}
+.break-timer.inactive {
+    opacity: 0.7;
+    font-weight: 600;
+}
+
+/* GÖREV KARTLARI */
+.section-title {
+    padding: 0 20px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #6c757d;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+}
+
+.task-card {
+    background: white;
+    margin: 0 15px 15px 15px;
+    padding: 20px;
+    border-radius: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-left: 5px solid #eee;
+}
+.task-card.active { border-left-color: #0d6efd; }
+.task-card.completed { border-left-color: #198754; opacity: 0.6; }
+
+.task-info h6 { margin: 0; font-size: 16px; font-weight: 700; color: #333; }
+.task-info p { margin: 0; font-size: 13px; color: #888; margin-top: 4px; }
+
+.btn-go {
+    width: 40px;
+    height: 40px;
+    background: #f0f2f5;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #0d6efd;
+    transition: 0.2s;
+}
+.task-card:active .btn-go {
+    background: #0d6efd;
+    color: white;
+}
+
+/* ALT MENÜ (SADELEŞTİRİLMİŞ) */
+.bottom-nav {
+    background: white;
+    height: 70px;
+    border-top: 1px solid #eee;
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    z-index: 1040;
+    padding-bottom: env(safe-area-inset-bottom);
+}
+.b-nav-item {
+    text-align: center;
+    color: #adb5bd;
+    text-decoration: none;
+    font-size: 10px;
+    width: 60px;
+}
+.b-nav-item i { font-size: 20px; margin-bottom: 4px; display: block; }
+.b-nav-item.active { color: #0d6efd; font-weight: 600; }
+
+/* ZİYARET DETAY SAYFASI */
+
+/* Mağaza Başlık Alanı */
+.store-header {
+    background: white;
+    padding: 20px;
+    border-bottom-left-radius: 20px;
+    border-bottom-right-radius: 20px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+/* Form Listesi */
+.survey-list-container {
+    padding: 0 20px 100px 20px; /* Alttan boşluk bıraktık ki buton kapatmasın */
+}
+
+.survey-item {
+    background: white;
+    border-radius: 12px;
+    padding: 15px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    border: 1px solid #eee;
+    transition: 0.2s;
+}
+.survey-item:active {
+    background-color: #f8f9fa;
+    transform: scale(0.98);
+}
+
+.survey-icon {
+    width: 40px;
+    height: 40px;
+    background: #eef2ff;
+    color: #4f46e5;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 15px;
+    font-size: 18px;
+}
+
+/* Sabit Alt Buton Alanı */
+.fixed-bottom-action {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background: white;
+    padding: 15px 20px;
+    padding-bottom: max(15px, env(safe-area-inset-bottom)); /* iPhone uyumu */
+    box-shadow: 0 -5px 20px rgba(0,0,0,0.1);
+    z-index: 2000; /* Menünün de üstünde */
+}
+
+.btn-start-visit {
+    width: 100%;
+    background: #0d6efd; /* Mavi */
+    color: white;
+    border: none;
+    padding: 15px;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    box-shadow: 0 4px 15px rgba(13, 110, 253, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.btn-start-visit:active {
+    transform: scale(0.98);
+    background: #0b5ed7;
+}
+
+/* Eğer ziyaret başladıysa buton rengi değişsin */
+.btn-started {
+    background: #dc3545; /* Kırmızı (Ziyareti Bitir) */
+    box-shadow: 0 4px 15px rgba(220, 53, 69, 0.4);
+}

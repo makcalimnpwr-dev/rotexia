@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2>Cari / Firma Ayarları</h2>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+              <li class="breadcrumb-item"><a href="{% url 'settings_home' %}">Ayarlar</a></li>
+              <li class="breadcrumb-item active">Firma Listesi</li>
+            </ol>
+        </nav>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-4">
+        <div class="card shadow border-0">
+            <div class="card-header bg-white">
+                <h5 class="m-0 fw-bold text-success">Yeni Firma Ekle</h5>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label">Firma Adı</label>
+                        {{ form.name }}
+                        <div class="form-text">Örn: Watsons, Gratis, Migros</div>
+                    </div>
+                    <button type="submit" class="btn btn-success w-100">Ekle</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-8">
+        <div class="card shadow border-0">
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0 align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Firma Adı</th>
+                            <th class="text-end">İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for cari in cariler %}
+                        <tr>
+                            <td><strong>{{ cari.name }}</strong></td>
+                            <td class="text-end">
+                                <a href="{% url 'delete_cari' cari.pk %}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Silmek istediğine emin misin?');">
+                                    <i class="fas fa-trash"></i>
+                                </a>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="2" class="text-center p-3">Henüz firma eklenmemiş.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

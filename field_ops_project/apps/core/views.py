@@ -2,7 +2,7 @@ from django.shortcuts import render, redirect
 from django.contrib.auth import login, get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.db import models
 from django.core.files.base import ContentFile
@@ -222,6 +222,13 @@ def home(request):
             }
         }
         return render(request, 'apps/core/home.html', context)
+
+
+def healthz(request):
+    """
+    Render/healthcheck endpoint. Always returns 200.
+    """
+    return HttpResponse("ok", content_type="text/plain")
 
 # --- MOBİL ANASAYFA ---
 @login_required

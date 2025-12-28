@@ -18,6 +18,12 @@ class TenantMiddleware(MiddlewareMixin):
     """
     
     def process_request(self, request):
+        # Allow Render health checks (and other infra checks) to bypass tenancy/DB calls.
+        # This prevents startup loops before migrations are applied.
+        if request.path.startswith("/healthz"):
+            request.tenant = None
+            return None
+
         tenant = None
         
         # 1. Subdomain kontrolü (production'da)

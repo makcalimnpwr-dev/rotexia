@@ -135,12 +135,17 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 # Django 5+: storage config
 STORAGES = {
     "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        # Manifest mode can cause 500s if any static entry is missing in production.
+        # For demo stability on Render, use non-manifest compressed storage.
+        "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
     },
     "default": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
     },
 }
+
+# If manifest storage is enabled later, don't hard-fail on missing entries.
+WHITENOISE_MANIFEST_STRICT = False
 
 # Media files (Yüklenen logolar vs.)
 MEDIA_URL = '/media/'

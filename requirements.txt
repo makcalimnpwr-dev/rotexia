@@ -1,7 +1,7 @@
 Django==5.0.1
 psycopg2-binary==2.9.9  # PostgreSQL hazırlığı
 django-jazzmin==2.6.0   # Modern Admin Teması
-Pillow==10.2.0          # Resim işleme
+Pillow==11.0.0          # Resim işleme (Render/Python uyumluluğu için güncel)
 gunicorn==21.2.0        # Canlı ortam sunucusu hazırlığı
 python-dotenv==1.0.0    # Gizli değişkenler için
 dj-database-url==2.1.0  # PostgreSQL connection string parsing

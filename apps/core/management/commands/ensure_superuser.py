@@ -42,3 +42,4 @@ class Command(BaseCommand):
         self.stdout.write(f"ensure_superuser: created superuser '{user.username}'.")
 
 
+

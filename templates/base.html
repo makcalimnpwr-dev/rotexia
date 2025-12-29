@@ -12,14 +12,24 @@
         html { font-size: 12px; }
         body { background-color: #f4f6f9; font-family: 'Segoe UI', sans-serif; overflow-x: hidden; }
 
-        .sidebar { height: 100vh; width: 18rem; position: fixed; top: 0; left: 0; background-color: #1e1e2d; padding-top: 1.25rem; z-index: 1000; }
+        :root { --sidebar-width: 21rem; }
+
+        .sidebar { height: 100vh; width: var(--sidebar-width); position: fixed; top: 0; left: 0; background-color: #1e1e2d; padding-top: 1.25rem; z-index: 1000; }
         .sidebar-brand { color: #fff; font-size: 1.6rem; font-weight: bold; text-align: center; margin-bottom: 2rem; letter-spacing: 1px; display: flex; align-items: center; justify-content: center; gap: .6rem; padding: 0 1rem; }
         .sidebar-brand img { height: 3rem; width: auto; }
         .sidebar a { padding: 1rem 1.5rem; text-decoration: none; font-size: 1.15rem; color: #a4a6b3; display: block; transition: 0.3s; border-left: 3px solid transparent; }
         .sidebar a:hover { color: #fff; background-color: #2c2c3e; }
         .sidebar a.active { color: #fff; background-color: #2c2c3e; border-left: 3px solid #dc3545; }
         .sidebar i { width: 2rem; text-align: center; margin-right: .75rem; }
-        .content { margin-left: 18rem; padding: 1.5rem; }
+        /* Submenu items under collapses (e.g., Raporlar) */
+        .sidebar .collapse a {
+            padding: .65rem 1.5rem .65rem 3.25rem;
+            font-size: 1.0rem;
+            color: #b7bac8;
+        }
+        .sidebar .collapse a i { width: 1.6rem; margin-right: .6rem; }
+
+        .content { margin-left: var(--sidebar-width); padding: 1.5rem; }
         .top-navbar { background-color: #fff; padding: 1rem 2rem; box-shadow: 0 2px 5px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; border-radius: .8rem; }
     </style>
 </head>
@@ -51,13 +61,13 @@
             <span class="float-end" style="opacity:.7;"><i class="fas fa-chevron-down"></i></span>
         </a>
         <div class="collapse" id="reportsMenu">
-            <a href="{% url 'visit_detail_report' %}" style="padding-left: 52px; font-size: 14px;">
+            <a href="{% url 'visit_detail_report' %}">
                 <i class="fas fa-file-alt"></i> Detaylı Ziyaret Raporu
             </a>
-            <a href="{% url 'daily_visit_summary_report' %}" style="padding-left: 52px; font-size: 14px;">
+            <a href="{% url 'daily_visit_summary_report' %}">
                 <i class="fas fa-chart-pie"></i> Günlük Ziyaret Özeti
             </a>
-            <a href="{% url 'survey_reports_home' %}" style="padding-left: 52px; font-size: 14px;">
+            <a href="{% url 'survey_reports_home' %}">
                 <i class="fas fa-clipboard-list"></i> Anket Raporları
             </a>
         </div>

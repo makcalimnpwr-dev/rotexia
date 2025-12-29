@@ -48,4 +48,9 @@ urlpatterns = [
     path('reports/trash/<int:report_id>/restore/', views.reports_trash_restore, name='reports_trash_restore'),
     path('reports/trash/<int:report_id>/delete-now/', views.reports_trash_delete_now, name='reports_trash_delete_now'),
     path('reports/<int:report_id>/delete/', views.report_move_to_trash, name='report_move_to_trash'),
+
+    # --- GÖRSELLER (Form Fotoğrafları) ---
+    path('visuals/', views.visuals_gallery, name='visuals_gallery'),
+    path('visuals/questions/', views.visuals_questions_api, name='visuals_questions_api'),
+    path('visuals/download/', views.visuals_download, name='visuals_download'),
 ]

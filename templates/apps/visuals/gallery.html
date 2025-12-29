@@ -1,0 +1,707 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load custom_tags %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="m-0">Görseller</h2>
+    <div class="text-muted small">Formlara eklenen fotoğrafları filtreleyip görüntüleyin ve toplu indirin.</div>
+  </div>
+  <div class="d-flex gap-2">
+    <button class="btn btn-outline-primary" type="button" id="downloadSelectedBtn" disabled>
+      <i class="fas fa-download"></i> Seçilenleri İndir
+    </button>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <style>
+      .filter-stack { max-width: 980px; }
+      .filter-details summary {
+        list-style: none;
+        cursor: pointer;
+        border: 1px solid rgba(0,0,0,.14);
+        border-radius: 10px;
+        padding: .65rem .9rem;
+        background: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: .75rem;
+      }
+      .filter-details summary::-webkit-details-marker { display: none; }
+      .filter-details[open] summary { border-color: rgba(13,110,253,.35); box-shadow: 0 0 0 .2rem rgba(13,110,253,.1); }
+      .filter-details .panel { padding: .65rem .15rem 0; }
+      .filter-details .panel .form-select { min-height: 180px; }
+      .filter-picked {
+        margin-top: 6px;
+        padding: 0 4px 2px;
+        color:#495057;
+        font-size: 12px;
+        line-height: 1.3;
+      }
+      .filter-picked b { color:#212529; }
+      .filter-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        border: 1px solid rgba(0,0,0,.12);
+        border-radius: 999px;
+        background: #fff;
+        margin: 3px 6px 3px 0;
+        max-width: 100%;
+      }
+      .filter-chip .chip-text {
+        max-width: 680px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .filter-chip .chip-remove {
+        border: 0;
+        background: transparent;
+        color: #dc3545;
+        font-weight: 700;
+        line-height: 1;
+        padding: 0 2px;
+        cursor: pointer;
+      }
+    </style>
+
+    <form method="get" id="filtersForm" class="filter-stack">
+      <div class="mb-2">
+        <details class="filter-details">
+          <summary>
+            <span class="fw-bold small">Müşteri Adı</span>
+            <span class="text-muted small"><i class="fas fa-chevron-down"></i></span>
+          </summary>
+          <div class="panel">
+            <div class="d-flex gap-2 align-items-center mb-2">
+              <input type="text" class="form-control form-control-sm filter-search" placeholder="Ara... (örn: Mağaza 5)" data-target="customerSelect">
+              <button type="button" class="btn btn-sm btn-outline-primary filter-apply" data-close="true">Uygula</button>
+            </div>
+            <div class="text-muted small mb-1">Seçilen: <span class="selected-count" data-for="customerSelect">0</span></div>
+            <select class="form-select" name="customer_ids" id="customerSelect" multiple>
+              {% for c in customers %}
+                <option value="{{ c.id }}" {% if c.id in selected_customer_ids %}selected{% endif %}>{{ c.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </details>
+        <div class="filter-picked" data-for="customerSelect">
+          <b>Seçilenler:</b>
+          <span class="chips" data-for="customerSelect">
+            {% if selected_customers %}
+              {% for c in selected_customers %}
+                <span class="filter-chip" data-select="customerSelect" data-value="{{ c.id }}">
+                  <span class="chip-text">{{ c.name }}</span>
+                  <button type="button" class="chip-remove" title="Kaldır">×</button>
+                </span>
+              {% endfor %}
+            {% else %}
+              -
+            {% endif %}
+          </span>
+        </div>
+      </div>
+
+      <div class="mb-2">
+        <details class="filter-details">
+          <summary>
+            <span class="fw-bold small">Cari</span>
+            <span class="text-muted small"><i class="fas fa-chevron-down"></i></span>
+          </summary>
+          <div class="panel">
+            <div class="d-flex gap-2 align-items-center mb-2">
+              <input type="text" class="form-control form-control-sm filter-search" placeholder="Ara..." data-target="cariSelect">
+              <button type="button" class="btn btn-sm btn-outline-primary filter-apply" data-close="true">Uygula</button>
+            </div>
+            <div class="text-muted small mb-1">Seçilen: <span class="selected-count" data-for="cariSelect">0</span></div>
+            <select class="form-select" name="cari_ids" id="cariSelect" multiple>
+              {% for c in caris %}
+                <option value="{{ c.id }}" {% if c.id in selected_cari_ids %}selected{% endif %}>{{ c.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </details>
+        <div class="filter-picked" data-for="cariSelect">
+          <b>Seçilenler:</b>
+          <span class="chips" data-for="cariSelect">
+            {% if selected_caris %}
+              {% for c in selected_caris %}
+                <span class="filter-chip" data-select="cariSelect" data-value="{{ c.id }}">
+                  <span class="chip-text">{{ c.name }}</span>
+                  <button type="button" class="chip-remove" title="Kaldır">×</button>
+                </span>
+              {% endfor %}
+            {% else %}
+              -
+            {% endif %}
+          </span>
+        </div>
+      </div>
+
+      <div class="mb-2">
+        <details class="filter-details">
+          <summary>
+            <span class="fw-bold small">Yetkili</span>
+            <span class="text-muted small"><i class="fas fa-chevron-down"></i></span>
+          </summary>
+          <div class="panel">
+            <div class="d-flex gap-2 align-items-center mb-2">
+              <input type="text" class="form-control form-control-sm filter-search" placeholder="Ara..." data-target="authoritySelect">
+              <button type="button" class="btn btn-sm btn-outline-primary filter-apply" data-close="true">Uygula</button>
+            </div>
+            <div class="text-muted small mb-1">Seçilen: <span class="selected-count" data-for="authoritySelect">0</span></div>
+            <select class="form-select" name="authority_user_ids" id="authoritySelect" multiple>
+              {% for n in authority_nodes %}
+                <option value="{{ n.assigned_user_id }}" {% if n.assigned_user_id in selected_authority_user_ids %}selected{% endif %}>
+                  {{ n }}
+                </option>
+              {% endfor %}
+            </select>
+            <div class="text-muted small mt-1">Seçilen yetkililerin altındaki kullanıcılar dahil edilir.</div>
+          </div>
+        </details>
+        <div class="filter-picked" data-for="authoritySelect">
+          <b>Seçilenler:</b>
+          <span class="chips" data-for="authoritySelect">
+            {% if selected_authorities %}
+              {% for a in selected_authorities %}
+                <span class="filter-chip" data-select="authoritySelect" data-value="{{ a.id }}">
+                  <span class="chip-text">{{ a.label }}</span>
+                  <button type="button" class="chip-remove" title="Kaldır">×</button>
+                </span>
+              {% endfor %}
+            {% else %}
+              -
+            {% endif %}
+          </span>
+        </div>
+      </div>
+
+      <div class="mb-2">
+        <details class="filter-details">
+          <summary>
+            <span class="fw-bold small">Saha Ekibi</span>
+            <span class="text-muted small"><i class="fas fa-chevron-down"></i></span>
+          </summary>
+          <div class="panel">
+            <div class="d-flex gap-2 align-items-center mb-2">
+              <input type="text" class="form-control form-control-sm filter-search" placeholder="Ara..." data-target="teamSelect">
+              <button type="button" class="btn btn-sm btn-outline-primary filter-apply" data-close="true">Uygula</button>
+            </div>
+            <div class="text-muted small mb-1">Seçilen: <span class="selected-count" data-for="teamSelect">0</span></div>
+            <select class="form-select" name="team_user_ids" id="teamSelect" multiple>
+              {% for u in team_users %}
+                <option value="{{ u.id }}" {% if u.id in selected_team_user_ids %}selected{% endif %}>
+                  {{ u.first_name }} {{ u.last_name }} ({{ u.username }})
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+        </details>
+        <div class="filter-picked" data-for="teamSelect">
+          <b>Seçilenler:</b>
+          <span class="chips" data-for="teamSelect">
+            {% if selected_team_users %}
+              {% for u in selected_team_users %}
+                <span class="filter-chip" data-select="teamSelect" data-value="{{ u.id }}">
+                  <span class="chip-text">{{ u.label }}</span>
+                  <button type="button" class="chip-remove" title="Kaldır">×</button>
+                </span>
+              {% endfor %}
+            {% else %}
+              -
+            {% endif %}
+          </span>
+        </div>
+      </div>
+
+      <div class="mb-2">
+        <details class="filter-details">
+          <summary>
+            <span class="fw-bold small">Form</span>
+            <span class="text-muted small"><i class="fas fa-chevron-down"></i></span>
+          </summary>
+          <div class="panel">
+            <div class="d-flex gap-2 align-items-center mb-2">
+              <input type="text" class="form-control form-control-sm filter-search" placeholder="Ara..." data-target="surveySelect">
+              <button type="button" class="btn btn-sm btn-outline-primary filter-apply" data-close="true">Uygula</button>
+            </div>
+            <div class="text-muted small mb-1">Seçilen: <span class="selected-count" data-for="surveySelect">0</span></div>
+            <select class="form-select" name="survey_ids" id="surveySelect" multiple>
+              {% for s in surveys %}
+                <option value="{{ s.id }}" {% if s.id in selected_survey_ids %}selected{% endif %}>{{ s.title }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </details>
+        <div class="filter-picked" data-for="surveySelect">
+          <b>Seçilenler:</b>
+          <span class="chips" data-for="surveySelect">
+            {% if selected_surveys %}
+              {% for s in selected_surveys %}
+                <span class="filter-chip" data-select="surveySelect" data-value="{{ s.id }}">
+                  <span class="chip-text">{{ s.title }}</span>
+                  <button type="button" class="chip-remove" title="Kaldır">×</button>
+                </span>
+              {% endfor %}
+            {% else %}
+              -
+            {% endif %}
+          </span>
+        </div>
+      </div>
+
+      <div class="mb-2">
+        <details class="filter-details">
+          <summary>
+            <span class="fw-bold small">Form Sorusu</span>
+            <span class="text-muted small"><i class="fas fa-chevron-down"></i></span>
+          </summary>
+          <div class="panel">
+            <div class="d-flex gap-2 align-items-center mb-2">
+              <input type="text" class="form-control form-control-sm filter-search" placeholder="Ara..." data-target="questionSelect">
+              <button type="button" class="btn btn-sm btn-outline-primary filter-apply" data-close="true">Uygula</button>
+            </div>
+            <div class="text-muted small mb-1">Seçilen: <span class="selected-count" data-for="questionSelect">0</span></div>
+            <select class="form-select" name="question_ids" id="questionSelect" multiple>
+              {% for q in questions %}
+                <option value="{{ q.id }}" {% if q.id in selected_question_ids %}selected{% endif %}>
+                  [{{ q.survey.title }}] {{ q.label }}
+                </option>
+              {% endfor %}
+            </select>
+            <div class="text-muted small mt-1">Form seçince sorular otomatik güncellenir.</div>
+          </div>
+        </details>
+        <div class="filter-picked" data-for="questionSelect">
+          <b>Seçilenler:</b>
+          <span class="chips" data-for="questionSelect">
+            {% if selected_questions %}
+              {% for q in selected_questions %}
+                <span class="filter-chip" data-select="questionSelect" data-value="{{ q.id }}">
+                  <span class="chip-text">{{ q.label }}</span>
+                  <button type="button" class="chip-remove" title="Kaldır">×</button>
+                </span>
+              {% endfor %}
+            {% else %}
+              -
+            {% endif %}
+          </span>
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <div class="row g-2">
+          <div class="col-md-6">
+            <label class="form-label fw-bold small">Başlangıç Tarihi</label>
+            <input type="date" class="form-control" name="start_date" value="{{ start_date|date:'Y-m-d' }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-bold small">Bitiş Tarihi</label>
+            <input type="date" class="form-control" name="end_date" value="{{ end_date|date:'Y-m-d' }}">
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary" href="{% url 'visuals_gallery' %}">
+          <i class="fas fa-rotate-left"></i> Filtreleri Temizle
+        </a>
+        <button class="btn btn-primary" type="submit">
+          <i class="fas fa-filter"></i> Uygula
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<form method="post" action="{% url 'visuals_download' %}" id="downloadForm">
+  {% csrf_token %}
+  <div id="selectedInputs"></div>
+</form>
+
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <div class="text-muted small">
+    Toplam: <strong id="totalCount">{{ page_obj.paginator.count }}</strong>
+    | Yüklendi: <strong id="loadedCount">{{ items|length }}</strong>
+  </div>
+  <div class="d-flex gap-2" id="pageNav">
+    {% if page_obj.has_previous %}
+      <a class="btn btn-sm btn-outline-secondary" href="?{% if request.GET.urlencode %}{{ request.GET.urlencode }}&{% endif %}page={{ page_obj.previous_page_number }}">Önceki</a>
+    {% endif %}
+    {% if page_obj.has_next %}
+      <a class="btn btn-sm btn-outline-secondary" href="?{% if request.GET.urlencode %}{{ request.GET.urlencode }}&{% endif %}page={{ page_obj.next_page_number }}">Sonraki</a>
+    {% endif %}
+  </div>
+</div>
+
+<style>
+  .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+  .photo-card { border: 1px solid rgba(0,0,0,.08); border-radius: 10px; overflow: hidden; background: #fff; }
+  .photo-thumb { width: 100%; height: 120px; object-fit: cover; background: #f1f3f5; display: block; cursor: pointer; }
+  .photo-meta { padding: 10px 10px 12px; }
+  .photo-meta .tag { display:block; font-size: 12px; line-height: 1.25; color: #495057; margin-bottom: 4px; }
+  .photo-meta .tag b { color: #212529; }
+  .photo-select { position: absolute; top: 10px; left: 10px; background: rgba(255,255,255,.9); border-radius: 8px; padding: 6px 8px; }
+  .photo-wrap { position: relative; }
+  .photo-empty { border: 2px dashed rgba(0,0,0,.12); padding: 28px; border-radius: 12px; text-align:center; color:#6c757d; }
+  .infinite-status { display:flex; align-items:center; justify-content:center; padding: 14px 0; color:#6c757d; }
+</style>
+
+{% if items %}
+  <div class="photo-grid" id="photoGrid">
+    {% for a in items %}
+      <div class="photo-card">
+        <div class="photo-wrap">
+          <div class="photo-select">
+            <input class="form-check-input photo-check" type="checkbox" value="{{ a.id }}">
+          </div>
+          <img
+            src="{{ a.answer_photo.url }}"
+            class="photo-thumb"
+            alt="Fotoğraf"
+            data-index="{{ forloop.counter0 }}"
+            data-url="{{ a.answer_photo.url }}"
+            data-store="{{ a.task.customer.name }}"
+            data-user="{{ user_map|get_item:a.task.merch_code|default:a.task.merch_code }}"
+            data-cari="{% if a.task.customer.cari %}{{ a.task.customer.cari.name }}{% endif %}"
+            data-form="{{ a.question.survey.title }}"
+            data-question="{{ a.question.label }}"
+            data-date="{{ a.created_at|date:'Y-m-d H:i' }}"
+          >
+        </div>
+        <div class="photo-meta">
+          <span class="tag"><b>Mağaza:</b> {{ a.task.customer.name }}</span>
+          <span class="tag"><b>Kullanıcı:</b> {{ user_map|get_item:a.task.merch_code|default:a.task.merch_code }}</span>
+          <span class="tag"><b>Cari:</b> {% if a.task.customer.cari %}{{ a.task.customer.cari.name }}{% else %}-{% endif %}</span>
+          <span class="tag"><b>Form:</b> {{ a.question.survey.title }}</span>
+          <span class="tag"><b>Form Sorusu:</b> {{ a.question.label }}</span>
+          <span class="tag"><b>Tarih:</b> {{ a.created_at|date:'Y-m-d H:i' }}</span>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+  <div class="infinite-status" id="infiniteStatus" data-current-page="{{ page_obj.number }}" data-total-pages="{{ page_obj.paginator.num_pages }}">
+    {% if page_obj.has_next %}
+      <span id="infiniteText">Aşağı kaydırınca yeni fotoğraflar yüklenecek…</span>
+    {% else %}
+      <span id="infiniteText">Hepsi yüklendi.</span>
+    {% endif %}
+  </div>
+{% else %}
+  <div class="photo-empty">
+    Bu filtrelerle görsel bulunamadı.
+  </div>
+{% endif %}
+
+<!-- Fullscreen modal -->
+<div class="modal fade" id="photoModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-fullscreen">
+    <div class="modal-content" style="background:#0b0f1a;">
+      <div class="modal-header border-0">
+        <div class="text-white small" id="modalCounter"></div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body d-flex flex-column align-items-center justify-content-center gap-3">
+        <div class="d-flex align-items-center justify-content-between w-100" style="max-width: 1200px;">
+          <button class="btn btn-outline-light" type="button" id="prevBtn"><i class="fas fa-chevron-left"></i></button>
+          <img id="modalImg" src="" alt="Fotoğraf" style="max-width: 100%; max-height: 70vh; object-fit: contain; border-radius: 10px;">
+          <button class="btn btn-outline-light" type="button" id="nextBtn"><i class="fas fa-chevron-right"></i></button>
+        </div>
+        <div class="w-100" style="max-width: 1200px;">
+          <div class="card border-0" style="background: rgba(255,255,255,.06);">
+            <div class="card-body text-white" style="font-size: 13px;">
+              <div id="modalMeta"></div>
+              <div class="mt-2 d-flex gap-2">
+                <a class="btn btn-sm btn-light" id="modalDownload" href="#" download>
+                  <i class="fas fa-download"></i> İndir
+                </a>
+              </div>
+            </div>
+          </div>
+          <div class="text-white-50 small mt-2">Klavye: ← / → ile gezinebilirsiniz.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Select elements
+  const customerSelect = document.getElementById('customerSelect');
+  const cariSelect = document.getElementById('cariSelect');
+  const authoritySelect = document.getElementById('authoritySelect');
+  const teamSelect = document.getElementById('teamSelect');
+  // surveySelect and questionSelect already have ids
+
+  function updateCount(selectEl) {
+    if (!selectEl) return;
+    const selectedOpts = Array.from(selectEl.selectedOptions || []);
+    const cnt = selectedOpts.length;
+    const countEl = document.querySelector(`.selected-count[data-for="${selectEl.id}"]`);
+    if (countEl) countEl.textContent = String(cnt);
+    const pickedEl = document.querySelector(`.filter-picked[data-for="${selectEl.id}"]`);
+    if (pickedEl) {
+      const chipsHost = pickedEl.querySelector(`.chips[data-for="${selectEl.id}"]`);
+      if (!chipsHost) return;
+      chipsHost.innerHTML = '';
+      if (!cnt) {
+        chipsHost.textContent = '-';
+        return;
+      }
+      for (const opt of selectedOpts) {
+        const chip = document.createElement('span');
+        chip.className = 'filter-chip';
+        chip.dataset.select = selectEl.id;
+        chip.dataset.value = opt.value;
+
+        const text = document.createElement('span');
+        text.className = 'chip-text';
+        text.textContent = (opt.textContent || '').trim();
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'chip-remove';
+        btn.title = 'Kaldır';
+        btn.textContent = '×';
+
+        chip.appendChild(text);
+        chip.appendChild(btn);
+        chipsHost.appendChild(chip);
+      }
+    }
+  }
+
+  function wireSelect(selectEl) {
+    if (!selectEl) return;
+    updateCount(selectEl);
+    selectEl.addEventListener('change', () => updateCount(selectEl));
+  }
+  wireSelect(customerSelect);
+  wireSelect(cariSelect);
+  wireSelect(authoritySelect);
+  wireSelect(teamSelect);
+  wireSelect(document.getElementById('surveySelect'));
+  wireSelect(document.getElementById('questionSelect'));
+
+  // Search within multi-selects (client-side filter)
+  document.querySelectorAll('.filter-search').forEach((inp) => {
+    inp.addEventListener('input', () => {
+      const targetId = inp.dataset.target;
+      const sel = document.getElementById(targetId);
+      if (!sel) return;
+      const q = (inp.value || '').toLowerCase().trim();
+      for (const opt of Array.from(sel.options)) {
+        const text = (opt.textContent || '').toLowerCase();
+        opt.hidden = q ? !text.includes(q) : false;
+      }
+    });
+  });
+
+  // Per-filter "Uygula": closes the details panel (global Apply still runs search)
+  document.querySelectorAll('.filter-apply').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const details = btn.closest('details');
+      if (details) details.open = false;
+    });
+  });
+
+  // Remove selected chip (×)
+  document.addEventListener('click', (e) => {
+    const btn = e.target;
+    if (!btn || !btn.classList || !btn.classList.contains('chip-remove')) return;
+    const chip = btn.closest('.filter-chip');
+    if (!chip) return;
+    const selectId = chip.dataset.select;
+    const value = chip.dataset.value;
+    const sel = document.getElementById(selectId);
+    if (!sel) return;
+    const opt = Array.from(sel.options).find(o => String(o.value) === String(value));
+    if (opt) opt.selected = false;
+    updateCount(sel);
+  });
+
+  const surveySelect = document.getElementById('surveySelect');
+  const questionSelect = document.getElementById('questionSelect');
+
+  async function refreshQuestions() {
+    if (!surveySelect) return;
+    const selected = Array.from(surveySelect.selectedOptions).map(o => o.value).filter(Boolean);
+    if (selected.length === 0) {
+      questionSelect.innerHTML = '';
+      return;
+    }
+    const params = selected.map(id => `survey_ids=${encodeURIComponent(id)}`).join('&');
+    const res = await fetch(`{% url 'visuals_questions_api' %}?${params}`);
+    const data = await res.json();
+    const prevSelected = new Set(Array.from(questionSelect.selectedOptions).map(o => o.value));
+    questionSelect.innerHTML = '';
+    for (const q of (data.questions || [])) {
+      const opt = document.createElement('option');
+      opt.value = q.id;
+      opt.textContent = q.label;
+      if (prevSelected.has(String(q.id))) opt.selected = true;
+      questionSelect.appendChild(opt);
+    }
+    // Apply current search filter to new options (if any)
+    const searchInp = document.querySelector('.filter-search[data-target="questionSelect"]');
+    if (searchInp) searchInp.dispatchEvent(new Event('input'));
+    updateCount(questionSelect);
+  }
+  if (surveySelect) surveySelect.addEventListener('change', refreshQuestions);
+
+  // Selection + bulk download
+  const downloadBtn = document.getElementById('downloadSelectedBtn');
+  const selectedInputs = document.getElementById('selectedInputs');
+  function updateSelectedState() {
+    const checks = Array.from(document.querySelectorAll('.photo-check'));
+    const selected = checks.filter(c => c.checked).map(c => c.value);
+    downloadBtn.disabled = selected.length === 0;
+    selectedInputs.innerHTML = '';
+    for (const id of selected) {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'answer_ids';
+      input.value = id;
+      selectedInputs.appendChild(input);
+    }
+  }
+  document.addEventListener('change', (e) => {
+    if (e.target && e.target.classList.contains('photo-check')) updateSelectedState();
+  });
+  downloadBtn?.addEventListener('click', () => {
+    updateSelectedState();
+    if (!downloadBtn.disabled) document.getElementById('downloadForm').submit();
+  });
+
+  // Fullscreen viewer + arrow navigation
+  const modalEl = document.getElementById('photoModal');
+  const modalImg = document.getElementById('modalImg');
+  const modalMeta = document.getElementById('modalMeta');
+  const modalCounter = document.getElementById('modalCounter');
+  const modalDownload = document.getElementById('modalDownload');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  let activeIndex = 0;
+
+  function getThumbs() {
+    return Array.from(document.querySelectorAll('.photo-thumb'));
+  }
+
+  function renderModal(i) {
+    const thumbs = getThumbs();
+    if (!thumbs[i]) return;
+    activeIndex = i;
+    const t = thumbs[i];
+    const url = t.dataset.url;
+    modalImg.src = url;
+    modalDownload.href = url;
+    modalCounter.textContent = `${i + 1} / ${thumbs.length}`;
+    const store = t.dataset.store || '-';
+    const user = t.dataset.user || '-';
+    const cari = t.dataset.cari || '-';
+    const form = t.dataset.form || '-';
+    const question = t.dataset.question || '-';
+    const dt = t.dataset.date || '-';
+    modalMeta.innerHTML = `
+      <div><b>Mağaza:</b> ${store}</div>
+      <div><b>Kullanıcı:</b> ${user}</div>
+      <div><b>Cari:</b> ${cari}</div>
+      <div><b>Form:</b> ${form}</div>
+      <div><b>Form Sorusu:</b> ${question}</div>
+      <div><b>Tarih:</b> ${dt}</div>
+    `;
+  }
+  function prev() {
+    const thumbs = getThumbs();
+    if (!thumbs.length) return;
+    renderModal((activeIndex - 1 + thumbs.length) % thumbs.length);
+  }
+  function next() {
+    const thumbs = getThumbs();
+    if (!thumbs.length) return;
+    renderModal((activeIndex + 1) % thumbs.length);
+  }
+  prevBtn?.addEventListener('click', prev);
+  nextBtn?.addEventListener('click', next);
+
+  document.getElementById('photoGrid')?.addEventListener('click', (e) => {
+    const t = e.target;
+    if (!t || !t.classList || !t.classList.contains('photo-thumb')) return;
+    const thumbs = getThumbs();
+    const idx = thumbs.indexOf(t);
+    if (idx < 0) return;
+    renderModal(idx);
+    const m = new bootstrap.Modal(modalEl);
+    m.show();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (!modalEl.classList.contains('show')) return;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); next(); }
+  });
+
+  // Infinite scroll: load next 20 automatically
+  (function setupInfiniteScroll() {
+    const status = document.getElementById('infiniteStatus');
+    const grid = document.getElementById('photoGrid');
+    const loadedCountEl = document.getElementById('loadedCount');
+    const nav = document.getElementById('pageNav');
+    if (!status || !grid) return;
+    if (nav) nav.style.display = 'none'; // fallback links exist but we hide when JS works
+
+    let currentPage = parseInt(status.dataset.currentPage || '1', 10);
+    const totalPages = parseInt(status.dataset.totalPages || '1', 10);
+    let loading = false;
+
+    async function loadNextPage() {
+      if (loading) return;
+      if (currentPage >= totalPages) {
+        const t = document.getElementById('infiniteText');
+        if (t) t.textContent = 'Hepsi yüklendi.';
+        return;
+      }
+      loading = true;
+      const t = document.getElementById('infiniteText');
+      if (t) t.textContent = 'Yükleniyor…';
+
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('page', String(currentPage + 1));
+        const res = await fetch(url.toString(), { headers: { 'X-Requested-With': 'fetch' } });
+        const html = await res.text();
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const newCards = Array.from(doc.querySelectorAll('#photoGrid .photo-card'));
+        if (newCards.length) {
+          for (const c of newCards) grid.appendChild(c);
+          currentPage += 1;
+          status.dataset.currentPage = String(currentPage);
+          if (loadedCountEl) loadedCountEl.textContent = String(document.querySelectorAll('.photo-card').length);
+          if (t) t.textContent = currentPage >= totalPages ? 'Hepsi yüklendi.' : 'Aşağı kaydırınca yeni fotoğraflar yüklenecek…';
+        } else {
+          if (t) t.textContent = 'Hepsi yüklendi.';
+        }
+      } catch (e) {
+        if (t) t.textContent = 'Yükleme hatası. Aşağı kaydırınca tekrar denenecek…';
+      } finally {
+        loading = false;
+      }
+    }
+
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some(en => en.isIntersecting)) loadNextPage();
+    }, { root: null, rootMargin: '400px', threshold: 0.01 });
+    io.observe(status);
+  })();
+</script>
+
+{% endblock %}
+
+

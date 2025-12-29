@@ -2,6 +2,9 @@ import json
 import ast
 import re
 from io import BytesIO
+import zipfile
+import os
+import unicodedata
 from datetime import date, datetime, timedelta
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
@@ -22,7 +25,7 @@ from .models import RoutePlan, VisitTask, VisitType
 from .models import ReportRecord
 from apps.forms.models import Survey, Question, SurveyAnswer
 from apps.core.models import SystemSetting
-from apps.customers.models import Customer
+from apps.customers.models import Customer, CustomerCari
 from apps.customers.models import CustomFieldDefinition
 from apps.users.hierarchy_access import get_hierarchy_scope_for_user
 from apps.users.models import AuthorityNode
@@ -656,6 +659,349 @@ def route_plan_list(request):
 @login_required
 def reports_home(request):
     return render(request, "apps/reports/home.html")
+
+
+def _safe_filename(value: str, max_len: int = 140) -> str:
+    """
+    Create a filesystem-safe filename segment from arbitrary text.
+    Keeps Turkish chars reasonably (normalizes), strips path separators and control chars.
+    """
+    if value is None:
+        return ""
+    s = str(value).strip()
+    s = unicodedata.normalize("NFKD", s)
+    # Remove path separators and other problematic chars
+    s = re.sub(r"[\\/:*?\"<>|\r\n\t]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    if len(s) > max_len:
+        s = s[:max_len].rstrip()
+    return s
+
+
+def _parse_int_list(qp_list) -> list[int]:
+    vals: list[int] = []
+    for v in (qp_list or []):
+        try:
+            vals.append(int(str(v).strip()))
+        except Exception:
+            continue
+    return vals
+
+
+def _summary_from_labels(labels: list[str]) -> str:
+    labels = [str(x).strip() for x in (labels or []) if str(x).strip()]
+    if not labels:
+        return ""
+    preview = ", ".join(labels[:2])
+    more = f" +{len(labels) - 2}" if len(labels) > 2 else ""
+    return f"{preview}{more}"
+
+
+def _visuals_resolve_usernames_from_filters(
+    *,
+    scope,
+    team_user_ids: list[int],
+    authority_user_ids: list[int],
+):
+    """
+    Combines:
+    - explicit team users
+    - users in subtree of selected authority users (include_self=True)
+    And always respects `scope` (if scope.usernames is non-empty).
+    """
+    filter_usernames: set[str] = set()
+
+    if team_user_ids:
+        filter_usernames.update(
+            User.objects.filter(id__in=team_user_ids).values_list("username", flat=True)
+        )
+
+    if authority_user_ids:
+        for u in User.objects.filter(id__in=authority_user_ids):
+            sc = get_hierarchy_scope_for_user(u, include_self=True)
+            # Empty set means "all" (Admin); in that case, include only the manager themselves.
+            if not sc.usernames:
+                filter_usernames.add(u.username)
+            else:
+                filter_usernames.update(sc.usernames)
+
+    # Apply permission scope
+    if scope.usernames:
+        if filter_usernames:
+            filter_usernames = set(scope.usernames).intersection(filter_usernames)
+        else:
+            filter_usernames = set(scope.usernames)
+
+    return filter_usernames
+
+
+@login_required
+def visuals_questions_api(request):
+    """
+    AJAX endpoint: returns questions for selected surveys.
+    GET: ?survey_ids=1&survey_ids=2
+    """
+    survey_ids = _parse_int_list(request.GET.getlist("survey_ids"))
+    if not survey_ids:
+        return JsonResponse({"questions": []})
+    qs = Question.objects.filter(survey_id__in=survey_ids).order_by("survey_id", "order", "id")
+    data = [
+        {"id": q.id, "label": q.label, "survey_id": q.survey_id, "input_type": q.input_type}
+        for q in qs
+    ]
+    return JsonResponse({"questions": data})
+
+
+@login_required
+def visuals_gallery(request):
+    """
+    Görseller: shows all survey/form photos with filters and bulk download.
+    Photos live on SurveyAnswer.answer_photo.
+    """
+    scope = get_hierarchy_scope_for_user(request.user, include_self=True)
+
+    # Defaults: last 30 days
+    start_date = _parse_date_yyyy_mm_dd(request.GET.get("start_date"))
+    end_date = _parse_date_yyyy_mm_dd(request.GET.get("end_date"))
+    if not start_date and not end_date:
+        end_date = date.today()
+        start_date = end_date - timedelta(days=30)
+    if start_date and not end_date:
+        end_date = start_date
+    if end_date and not start_date:
+        start_date = end_date
+
+    customer_ids = _parse_int_list(request.GET.getlist("customer_ids"))
+    cari_ids = _parse_int_list(request.GET.getlist("cari_ids"))
+    survey_ids = _parse_int_list(request.GET.getlist("survey_ids"))
+    question_ids = _parse_int_list(request.GET.getlist("question_ids"))
+    authority_user_ids = _parse_int_list(request.GET.getlist("authority_user_ids"))
+    team_user_ids = _parse_int_list(request.GET.getlist("team_user_ids"))
+
+    # Selected summaries (server-side so selections are visible even without JS)
+    selected_customers = (
+        list(Customer.objects.filter(id__in=customer_ids).values("id", "name").order_by("name"))
+        if customer_ids
+        else []
+    )
+    selected_caris = (
+        list(CustomerCari.objects.filter(id__in=cari_ids).values("id", "name").order_by("name"))
+        if cari_ids
+        else []
+    )
+    selected_surveys = (
+        list(Survey.objects.filter(id__in=survey_ids).values("id", "title").order_by("title"))
+        if survey_ids
+        else []
+    )
+    selected_question_labels = []
+    selected_questions = []
+    if question_ids:
+        qs_sel = list(
+            Question.objects.select_related("survey")
+            .filter(id__in=question_ids)
+            .order_by("survey_id", "order", "id")
+        )
+        selected_questions = [
+            {"id": q.id, "label": f"{q.survey.title}: {q.label}"} for q in qs_sel
+        ]
+        selected_question_labels = [x["label"] for x in selected_questions]
+    selected_team_user_labels = []
+    selected_team_users = []
+    if team_user_ids:
+        for u in User.objects.filter(id__in=team_user_ids).order_by("first_name", "last_name", "username"):
+            nm = (f"{u.first_name} {u.last_name}".strip() or u.username)
+            label = f"{nm} ({u.username})"
+            selected_team_user_labels.append(label)
+            selected_team_users.append({"id": u.id, "label": label})
+    selected_authority_labels = []
+    selected_authorities = []
+    if authority_user_ids:
+        for n in (
+            AuthorityNode.objects.select_related("assigned_user")
+            .filter(assigned_user_id__in=authority_user_ids)
+            .order_by("sort_order", "id")
+        ):
+            label = str(n)
+            selected_authority_labels.append(label)
+            selected_authorities.append({"id": n.assigned_user_id, "label": label})
+
+    filter_usernames = _visuals_resolve_usernames_from_filters(
+        scope=scope,
+        team_user_ids=team_user_ids,
+        authority_user_ids=authority_user_ids,
+    )
+
+    qs = (
+        SurveyAnswer.objects.select_related(
+            "task",
+            "task__customer",
+            "task__customer__cari",
+            "question",
+            "question__survey",
+        )
+        .exclude(answer_photo__isnull=True)
+        .exclude(answer_photo="")
+    )
+
+    # Date range (SurveyAnswer.created_at)
+    if start_date and end_date:
+        qs = qs.filter(created_at__date__gte=start_date, created_at__date__lte=end_date)
+
+    # Hierarchy/user filter (VisitTask.merch_code is username)
+    if filter_usernames:
+        qs = qs.filter(task__merch_code__in=list(filter_usernames))
+
+    if customer_ids:
+        qs = qs.filter(task__customer_id__in=customer_ids)
+    if cari_ids:
+        qs = qs.filter(task__customer__cari_id__in=cari_ids)
+    if survey_ids:
+        qs = qs.filter(question__survey_id__in=survey_ids)
+    if question_ids:
+        qs = qs.filter(question_id__in=question_ids)
+
+    qs = qs.order_by("-created_at", "-id")
+
+    # UX: keep pages light and enable infinite scroll on frontend
+    paginator = Paginator(qs, 20)
+    page_obj = paginator.get_page(request.GET.get("page") or 1)
+    items = list(page_obj.object_list)
+
+    # Build lookup for pretty user names
+    usernames = list({a.task.merch_code for a in items if a.task and a.task.merch_code})
+    user_map = {
+        u.username: (f"{u.first_name} {u.last_name}".strip() or u.username)
+        for u in User.objects.filter(username__in=usernames)
+    }
+
+    # Choice lists (restricted by scope when possible)
+    customers_qs = Customer.objects.all().order_by("name")
+    caris_qs = CustomerCari.objects.all().order_by("name")
+    surveys_qs = Survey.objects.all().order_by("title")
+
+    team_users_qs = User.objects.filter(is_active=True).order_by("first_name", "last_name", "username")
+    if scope.usernames:
+        team_users_qs = team_users_qs.filter(username__in=scope.usernames)
+
+    authority_nodes = AuthorityNode.objects.select_related("assigned_user").filter(assigned_user__isnull=False)
+    if scope.usernames:
+        authority_nodes = authority_nodes.filter(assigned_user__username__in=scope.usernames)
+    authority_nodes = authority_nodes.order_by("sort_order", "id")
+
+    questions_qs = Question.objects.none()
+    if survey_ids:
+        questions_qs = Question.objects.filter(survey_id__in=survey_ids).order_by("survey_id", "order", "id")
+
+    return render(
+        request,
+        "apps/visuals/gallery.html",
+        {
+            "start_date": start_date,
+            "end_date": end_date,
+            "page_obj": page_obj,
+            "items": items,
+            "user_map": user_map,
+            "customers": customers_qs,
+            "caris": caris_qs,
+            "surveys": surveys_qs,
+            "questions": questions_qs,
+            "team_users": team_users_qs,
+            "authority_nodes": authority_nodes,
+            # selected filters (for keeping selections)
+            "selected_customer_ids": customer_ids,
+            "selected_cari_ids": cari_ids,
+            "selected_survey_ids": survey_ids,
+            "selected_question_ids": question_ids,
+            "selected_team_user_ids": team_user_ids,
+            "selected_authority_user_ids": authority_user_ids,
+            "customer_summary": _summary_from_labels([x["name"] for x in selected_customers]),
+            "cari_summary": _summary_from_labels([x["name"] for x in selected_caris]),
+            "survey_summary": _summary_from_labels([x["title"] for x in selected_surveys]),
+            "question_summary": _summary_from_labels(selected_question_labels),
+            "team_summary": _summary_from_labels(selected_team_user_labels),
+            "authority_summary": _summary_from_labels(selected_authority_labels),
+            "selected_customers": selected_customers,
+            "selected_caris": selected_caris,
+            "selected_surveys": selected_surveys,
+            "selected_questions": selected_questions,
+            "selected_team_users": selected_team_users,
+            "selected_authorities": selected_authorities,
+        },
+    )
+
+
+@login_required
+@require_POST
+def visuals_download(request):
+    """
+    Bulk download selected photos. If one selected => raw file. Else => ZIP.
+    """
+    scope = get_hierarchy_scope_for_user(request.user, include_self=True)
+    ids = _parse_int_list(request.POST.getlist("answer_ids"))
+    if not ids:
+        return HttpResponse("Seçim yok.", content_type="text/plain", status=400)
+
+    qs = (
+        SurveyAnswer.objects.select_related(
+            "task",
+            "task__customer",
+            "task__customer__cari",
+            "question",
+            "question__survey",
+        )
+        .filter(id__in=ids)
+        .exclude(answer_photo__isnull=True)
+        .exclude(answer_photo="")
+    )
+    if scope.usernames:
+        qs = qs.filter(task__merch_code__in=scope.usernames)
+
+    answers = list(qs.order_by("-created_at", "-id"))
+    if not answers:
+        return HttpResponse("Fotoğraf bulunamadı.", content_type="text/plain", status=404)
+
+    # Single file => serve directly
+    if len(answers) == 1:
+        a = answers[0]
+        if not a.answer_photo:
+            return HttpResponse("Dosya yok.", content_type="text/plain", status=404)
+        name = a.answer_photo.name
+        base = os.path.basename(name)
+        store = _safe_filename(getattr(a.task.customer, "name", ""))
+        cari = _safe_filename(getattr(getattr(a.task.customer, "cari", None), "name", ""))
+        form = _safe_filename(getattr(a.question.survey, "title", ""))
+        qlab = _safe_filename(getattr(a.question, "label", ""))
+        dt = a.created_at.strftime("%Y-%m-%d_%H-%M")
+        ext = os.path.splitext(base)[1] or ".jpg"
+        filename_base = f"{store} | {cari} | {a.task.merch_code} | {form} | {qlab} | {dt}"
+        filename = _safe_filename(filename_base, max_len=180) + ext
+        resp = HttpResponse(a.answer_photo.open("rb"), content_type="application/octet-stream")
+        resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return resp
+
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for a in answers:
+            try:
+                base = os.path.basename(a.answer_photo.name or "")
+                ext = os.path.splitext(base)[1] or ".jpg"
+                store = _safe_filename(getattr(a.task.customer, "name", ""))
+                cari = _safe_filename(getattr(getattr(a.task.customer, "cari", None), "name", ""))
+                form = _safe_filename(getattr(a.question.survey, "title", ""))
+                qlab = _safe_filename(getattr(a.question, "label", ""))
+                dt = a.created_at.strftime("%Y-%m-%d_%H-%M")
+                fname_base = f"{store} | {cari} | {a.task.merch_code} | {form} | {qlab} | {dt} | {a.id}"
+                fname = _safe_filename(fname_base, max_len=180) + ext
+                with a.answer_photo.open("rb") as f:
+                    zf.writestr(fname, f.read())
+            except Exception:
+                continue
+
+    buf.seek(0)
+    resp = HttpResponse(buf.getvalue(), content_type="application/zip")
+    resp["Content-Disposition"] = 'attachment; filename="gorseller.zip"'
+    return resp
 
 
 def _parse_date_yyyy_mm_dd(val: str | None) -> date | None:

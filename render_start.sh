@@ -6,6 +6,9 @@ echo "== Rotexia: pre-start checks =="
 echo "Running migrations..."
 python manage.py migrate --noinput
 
+echo "Collecting static files..."
+python manage.py collectstatic --noinput
+
 echo "Ensuring superuser (optional)..."
 python manage.py ensure_superuser || true
 

@@ -27,6 +27,8 @@ urlpatterns = [
     path('hierarchy/assign-user/', views.hierarchy_assign_user, name='hierarchy_assign_user'),
     path('hierarchy/unassign-user/', views.hierarchy_unassign_user, name='hierarchy_unassign_user'),
     path('hierarchy/delete-node/', views.hierarchy_delete_node, name='hierarchy_delete_node'),
+    path('hierarchy/get-menu-permissions/', views.hierarchy_get_menu_permissions, name='hierarchy_get_menu_permissions'),
+    path('hierarchy/save-menu-permissions/', views.hierarchy_save_menu_permissions, name='hierarchy_save_menu_permissions'),
     # Eski endpoint (geriye dönük): artık kullanılmıyor
     path('hierarchy/users/', views.hierarchy_users_for_authority, name='hierarchy_users_for_authority'),
 ]

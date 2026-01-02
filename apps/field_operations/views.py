@@ -34,6 +34,34 @@ from apps.core.excel_utils import xlsx_from_rows, xlsx_to_rows
 User = get_user_model()
 CYCLE_START_DATE = date(2025, 12, 22)
 
+def _resolve_merch_to_username(raw_merch: str | None) -> str | None:
+    """
+    Merch/person identifier resolver.
+    Accepts either:
+    - username (used by VisitTask.merch_code)
+    - user_code (CustomUser.user_code)
+    Returns canonical username or None if not found.
+    """
+    if raw_merch is None:
+        return None
+    s = str(raw_merch).strip()
+    if not s or s.lower() == "nan":
+        return None
+    u = User.objects.filter(username__iexact=s).first()
+    if u:
+        return u.username
+    # Excel'lerde bazen kullanıcı kodu geliyor
+    u = User.objects.filter(user_code__iexact=s).first()
+    return u.username if u else None
+
+
+def _username_allowed_by_scope(scope, username: str) -> bool:
+    # Empty set means "all"
+    if not scope.usernames:
+        return True
+    return username in scope.usernames
+
+
 def _truthy_qp(val: str | None) -> bool:
     """
     Parse truthy query param values (e.g. ?x=1, ?x=on, ?x=true).
@@ -208,9 +236,12 @@ def import_tasks(request):
 
     if request.method == 'POST' and request.FILES.get('excel_file'):
         try:
+            scope = get_hierarchy_scope_for_user(request.user, include_self=True)
             rows = xlsx_to_rows(request.FILES['excel_file'])
             updated_count = 0
             created_count = 0
+            invalid_merch_count = 0
+            blocked_merch_count = 0
             cols = list(rows[0].keys()) if rows else []
 
             for row in rows:
@@ -250,7 +281,14 @@ def import_tasks(request):
                             task.planned_date = p_date
                             task.cycle_day = c_day
                         excel_merch = row.get('Personel') or row.get('Personel Kodu')
-                        if excel_merch: task.merch_code = str(excel_merch).strip()
+                        if excel_merch:
+                            resolved = _resolve_merch_to_username(str(excel_merch).strip())
+                            if not resolved:
+                                invalid_merch_count += 1
+                            elif not _username_allowed_by_scope(scope, resolved):
+                                blocked_merch_count += 1
+                            else:
+                                task.merch_code = resolved
                         if 'Ziyaret Notu' in cols: task.visit_note = row.get('Ziyaret Notu')
                         task.save()
                         updated_count += 1
@@ -261,14 +299,30 @@ def import_tasks(request):
                     if cust_code and merch:
                         try:
                             customer = Customer.objects.get(customer_code=str(cust_code).strip())
+                            resolved = _resolve_merch_to_username(str(merch).strip())
+                            if not resolved:
+                                invalid_merch_count += 1
+                                continue
+                            if not _username_allowed_by_scope(scope, resolved):
+                                blocked_merch_count += 1
+                                continue
                             VisitTask.objects.create(
-                                customer=customer, merch_code=str(merch).strip(), 
+                                customer=customer, merch_code=resolved, 
                                 planned_date=p_date, cycle_day=c_day, status='pending'
                             )
                             created_count += 1
                         except Customer.DoesNotExist: pass
             
-            messages.success(request, f"İşlem Tamam: {created_count} yeni, {updated_count} güncellendi.")
+            if invalid_merch_count > 0 or blocked_merch_count > 0:
+                if invalid_merch_count > 0:
+                    messages.error(request, f"❌ HATA: {invalid_merch_count} satırda kullanıcı bulunamadı! Lütfen Excel'deki kullanıcı adlarını kontrol edin. Sistemde olmayan kullanıcılara görev atanamaz.")
+                if blocked_merch_count > 0:
+                    messages.warning(request, f"⚠️ UYARI: {blocked_merch_count} satırda yetkiniz dışı kullanıcı atlandı.")
+                if created_count > 0 or updated_count > 0:
+                    messages.info(request, f"✓ Başarılı: {created_count} yeni görev oluşturuldu, {updated_count} görev güncellendi.")
+            else:
+                msg = f"✓ İşlem Tamam: {created_count} yeni görev oluşturuldu, {updated_count} görev güncellendi."
+                messages.success(request, msg)
         except Exception as e:
             messages.error(request, f"Hata: {str(e)}")
             
@@ -384,8 +438,16 @@ def bulk_task_action(request):
             msg_parts = []
 
             if new_merch:
-                updates['merch_code'] = new_merch
-                msg_parts.append(f"Personel: {new_merch}")
+                scope = get_hierarchy_scope_for_user(request.user, include_self=True)
+                resolved = _resolve_merch_to_username(new_merch)
+                if not resolved:
+                    messages.error(request, f"❌ HATA: '{new_merch}' kullanıcısı sistemde bulunamadı! Lütfen önce kullanıcıyı oluşturun.")
+                    return HttpResponseRedirect(referer)
+                if not _username_allowed_by_scope(scope, resolved):
+                    messages.error(request, "Bu kullanıcı için işlem yetkiniz yok.")
+                    return HttpResponseRedirect(referer)
+                updates['merch_code'] = resolved
+                msg_parts.append(f"Personel: {resolved}")
             
             if new_date_str:
                 try:
@@ -433,6 +495,7 @@ def generate_daily_tasks(request):
     # -------------------------------
 
     all_routes = RoutePlan.objects.all()
+    invalid_merch_routes = 0
     count = 0
     
     for route in all_routes:
@@ -445,23 +508,30 @@ def generate_daily_tasks(request):
         
         # 3. KONTROL ET
         if str(cycle_day) in found_days:
+            # Route üzerindeki personel sistemde yoksa görev oluşturma
+            resolved = _resolve_merch_to_username(route.merch_code)
+            if not resolved:
+                invalid_merch_routes += 1
+                continue
             
             # Sadece EKSİK olanları tamamla
+            # Hem tarih hem de personel kontrolü yap (aynı müşteri + tarih + personel kombinasyonu)
             exists = VisitTask.objects.filter(
                 customer=route.customer, 
-                planned_date=target_date
+                planned_date=target_date,
+                merch_code=resolved
             ).exclude(status='cancelled').exists()
             
             if not exists:
                 VisitTask.objects.create(
                     customer=route.customer, 
-                    merch_code=route.merch_code, 
+                    merch_code=resolved, 
                     planned_date=target_date, 
                     cycle_day=cycle_day, 
                     status='pending'
                 )
                 count += 1
-                print(f"[EKLEME] Müşteri: {route.customer.name} (Rotasında {found_days} var)")
+                print(f"[EKLEME] Müşteri: {route.customer.name} -> {resolved} (Rotasında {found_days} var)")
             else:
                 # Zaten varsa loga yaz (Debug için)
                 # print(f"[VAR] {route.customer.name} zaten mevcut.")
@@ -469,7 +539,13 @@ def generate_daily_tasks(request):
                 
     print(f"--- İŞLEM BİTTİ: {count} GÖREV EKLENDİ ---\n")
     
-    messages.success(request, f"{target_date.strftime('%d.%m.%Y')} ({cycle_day}. Gün) tarandı. {count} eksik görev geri getirildi.")
+    if invalid_merch_routes > 0:
+        messages.error(request, f"❌ HATA: {invalid_merch_routes} rota kaydında kullanıcı bulunamadı! Bu rotalar için görev oluşturulamadı. Lütfen önce kullanıcıları oluşturun.")
+        if count > 0:
+            messages.info(request, f"✓ {target_date.strftime('%d.%m.%Y')} ({cycle_day}. Gün) tarandı. {count} eksik görev geri getirildi.")
+    else:
+        msg = f"✓ {target_date.strftime('%d.%m.%Y')} ({cycle_day}. Gün) tarandı. {count} eksik görev geri getirildi."
+        messages.success(request, msg)
     return HttpResponseRedirect(referer)
 
 # --- 7. TEKİL MANUEL OLUŞTURMA ---
@@ -484,6 +560,14 @@ def create_manual_task(request):
         
         try:
             customer = Customer.objects.get(customer_code=customer_code)
+            scope = get_hierarchy_scope_for_user(request.user, include_self=True)
+            resolved = _resolve_merch_to_username(merch_code)
+            if not resolved:
+                messages.error(request, f"❌ HATA: '{merch_code}' kullanıcısı sistemde bulunamadı! Lütfen önce kullanıcıyı oluşturun.")
+                return HttpResponseRedirect(referer)
+            if not _username_allowed_by_scope(scope, resolved):
+                messages.error(request, "Bu kullanıcı için işlem yetkiniz yok.")
+                return HttpResponseRedirect(referer)
             p_date = None
             c_day = 0
             if planned_date:
@@ -494,7 +578,7 @@ def create_manual_task(request):
             v_type = None
             if visit_type_id: v_type = VisitType.objects.get(id=visit_type_id)
 
-            VisitTask.objects.create(customer=customer, merch_code=merch_code, planned_date=p_date, cycle_day=c_day, status='pending', visit_type=v_type)
+            VisitTask.objects.create(customer=customer, merch_code=resolved, planned_date=p_date, cycle_day=c_day, status='pending', visit_type=v_type)
             messages.success(request, "Görev oluşturuldu.")
         except Exception as e: messages.error(request, str(e))
     return HttpResponseRedirect(referer)
@@ -519,7 +603,16 @@ def edit_task(request, pk):
             task.save()
             return redirect('task_list')
         elif action == 'save':
-            task.merch_code = request.POST.get('merch_code')
+            scope = get_hierarchy_scope_for_user(request.user, include_self=True)
+            resolved = _resolve_merch_to_username(request.POST.get('merch_code'))
+            if not resolved:
+                merch_input = request.POST.get('merch_code', '')
+                messages.error(request, f"❌ HATA: '{merch_input}' kullanıcısı sistemde bulunamadı! Lütfen önce kullanıcıyı oluşturun.")
+                return redirect('task_list')
+            if not _username_allowed_by_scope(scope, resolved):
+                messages.error(request, "Bu kullanıcı için işlem yetkiniz yok.")
+                return redirect('task_list')
+            task.merch_code = resolved
             task.visit_note = request.POST.get('visit_note')
             p_date = request.POST.get('planned_date')
             if p_date:
@@ -2391,6 +2484,18 @@ def action_route_day(request):
         target_day = request.POST.get('target_day') # Yeni gün (Örn: 5)
         
         try:
+            # Validate transfer target BEFORE mutating current route
+            if action == "assign":
+                scope = get_hierarchy_scope_for_user(request.user, include_self=True)
+                resolved_target = _resolve_merch_to_username(target_merch)
+                if not resolved_target:
+                    messages.error(request, f"❌ HATA: '{target_merch}' kullanıcısı sistemde bulunamadı! Lütfen önce kullanıcıyı oluşturun.")
+                    return redirect('route_plan_list')
+                if not _username_allowed_by_scope(scope, resolved_target):
+                    messages.error(request, "Bu kullanıcı için işlem yetkiniz yok.")
+                    return redirect('route_plan_list')
+                target_merch = resolved_target
+
             route = RoutePlan.objects.get(id=route_id)
             
             # 1. MEVCUT GÜNÜ LİSTEDEN ÇIKAR
@@ -2456,6 +2561,7 @@ def import_route_plan(request):
     if request.method == 'POST' and request.FILES.get('excel_file'):
         print("\n=== DETAYLI EXCEL ANALİZİ (TRANSFER MODU) ===") 
         try:
+            scope = get_hierarchy_scope_for_user(request.user, include_self=True)
             # ADIM 1: Excel'i Oku
             rows = xlsx_to_rows(request.FILES['excel_file'])
             if not rows:
@@ -2483,6 +2589,8 @@ def import_route_plan(request):
 
             unique_merchs = []
             seen_merchs = set()
+            invalid_merchs = set()
+            blocked_merchs = set()
             for r in rows:
                 v = r.get(merch_col)
                 if v is None:
@@ -2490,9 +2598,38 @@ def import_route_plan(request):
                 s = str(v).strip()
                 if not s or s.lower() == "nan":
                     continue
-                if s not in seen_merchs:
-                    unique_merchs.append(s)
-                    seen_merchs.add(s)
+                resolved = _resolve_merch_to_username(s)
+                r["_merch_username"] = resolved
+                if not resolved:
+                    invalid_merchs.add(s)
+                    print(f"[ROTA YÜKLEME] Geçersiz kullanıcı bulundu: '{s}' -> None")
+                    continue
+                if not _username_allowed_by_scope(scope, resolved):
+                    blocked_merchs.add(resolved)
+                    continue
+                if resolved not in seen_merchs:
+                    unique_merchs.append(resolved)
+                    seen_merchs.add(resolved)
+            
+            # --- ÖNCE HATA KONTROLÜ: Eğer hiç geçerli kullanıcı yoksa işlemi durdur ---
+            if invalid_merchs:
+                invalid_list = ", ".join(list(invalid_merchs)[:5])  # İlk 5'ini göster
+                if len(invalid_merchs) > 5:
+                    invalid_list += f" ve {len(invalid_merchs) - 5} kullanıcı daha"
+                error_msg = f"❌ HATA: {len(invalid_merchs)} kullanıcı sistemde bulunamadı! ({invalid_list}) Bu kullanıcılar için rota yüklenemedi. Lütfen önce kullanıcıları oluşturun."
+                print(f"[ROTA YÜKLEME] HATA MESAJI: {error_msg}")
+                messages.error(request, error_msg)
+                if not unique_merchs:
+                    # Hiç geçerli kullanıcı yoksa işlemi durdur
+                    print(f"[ROTA YÜKLEME] Hiç geçerli kullanıcı yok, işlem durduruluyor.")
+                    return HttpResponseRedirect(referer)
+            
+            if blocked_merchs:
+                blocked_list = ", ".join(list(blocked_merchs)[:5])  # İlk 5'ini göster
+                if len(blocked_merchs) > 5:
+                    blocked_list += f" ve {len(blocked_merchs) - 5} kullanıcı daha"
+                messages.warning(request, f"⚠️ UYARI: {len(blocked_merchs)} kullanıcı için yetkiniz yok. ({blocked_list}) Bu kullanıcılar atlandı.")
+            
             success_count = 0
             task_action_count = 0
             
@@ -2515,7 +2652,7 @@ def import_route_plan(request):
                         r.save()
 
                     # 2. EKLEME VE GÖREV YÖNETİMİ
-                    merch_rows = [r for r in rows if str(r.get(merch_col) or "").strip() == merch_name]
+                    merch_rows = [r for r in rows if r.get("_merch_username") == merch_name]
                     
                     for row in merch_rows:
                         # Müşteriyi Bul
@@ -2600,12 +2737,13 @@ def import_route_plan(request):
 
             print(f"=== RAPOR: {success_count} Rota Güncellendi, {task_action_count} Görev İşlendi (Yeni/Transfer) ===")
             
+            # Başarı mesajları (eğer işlem yapıldıysa)
             if task_action_count > 0:
-                messages.success(request, f"İşlem Başarılı: {success_count} rota güncellendi. {task_action_count} adet görev oluşturuldu veya yeni personele transfer edildi.")
+                messages.success(request, f"✓ İşlem Başarılı: {success_count} rota güncellendi. {task_action_count} adet görev oluşturuldu veya yeni personele transfer edildi.")
             elif success_count > 0:
-                 messages.warning(request, f"{success_count} rota güncellendi. Görevler zaten bu personelin üzerindeydi.")
-            else:
-                 messages.error(request, "Hiçbir kayıt güncellenemedi.")
+                 messages.warning(request, f"⚠️ {success_count} rota güncellendi. Görevler zaten bu personelin üzerindeydi.")
+            elif not invalid_merchs:  # Sadece geçersiz kullanıcı yoksa bu mesajı göster
+                 messages.error(request, "❌ Hiçbir kayıt güncellenemedi. Lütfen Excel dosyanızı kontrol edin.")
 
         except Exception as e:
             print(f"HATA: {str(e)}")
@@ -2625,6 +2763,15 @@ def sync_merch_routes(request):
         merch_code = request.POST.get('merch_code')
         
         if merch_code:
+            scope = get_hierarchy_scope_for_user(request.user, include_self=True)
+            resolved = _resolve_merch_to_username(merch_code)
+            if not resolved:
+                messages.error(request, f"❌ HATA: '{merch_code}' kullanıcısı sistemde bulunamadı! Lütfen önce kullanıcıyı oluşturun.")
+                return HttpResponseRedirect(referer)
+            if not _username_allowed_by_scope(scope, resolved):
+                messages.error(request, "Bu kullanıcı için işlem yetkiniz yok.")
+                return HttpResponseRedirect(referer)
+            merch_code = resolved
             today = date.today()
             # 28 Günlük (1 Aylık) tam tarama yapalım
             RANGE_DAYS = 28 
@@ -2652,9 +2799,11 @@ def sync_merch_routes(request):
                     if str(cycle_day) in found_days:
                         
                         # Görev var mı kontrol et (İptal edilenler hariç)
+                        # Hem tarih hem de personel kontrolü yap (aynı müşteri + tarih + personel kombinasyonu)
                         exists = VisitTask.objects.filter(
                             customer=route.customer,
-                            planned_date=target_date
+                            planned_date=target_date,
+                            merch_code=merch_code
                         ).exclude(status='cancelled').exists()
                         
                         # Yoksa oluştur
@@ -2735,6 +2884,15 @@ def add_store_to_route(request):
         
         if merch_code and customer_id and day:
             try:
+                scope = get_hierarchy_scope_for_user(request.user, include_self=True)
+                resolved = _resolve_merch_to_username(merch_code)
+                if not resolved:
+                    messages.error(request, f"❌ HATA: '{merch_code}' kullanıcısı sistemde bulunamadı! Lütfen önce kullanıcıyı oluşturun.")
+                    return HttpResponseRedirect(referer)
+                if not _username_allowed_by_scope(scope, resolved):
+                    messages.error(request, "Bu kullanıcı için işlem yetkiniz yok.")
+                    return HttpResponseRedirect(referer)
+                merch_code = resolved
                 customer = Customer.objects.get(id=customer_id)
                 
                 # Bu personel ve müşteri için zaten kayıt var mı?

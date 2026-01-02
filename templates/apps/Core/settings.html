@@ -79,7 +79,7 @@
                     </div>
 
                     <div class="tab-pane fade" id="user">
-                        <div class="card shadow-sm border-0">
+                        <div class="card shadow-sm border-0 mb-3">
                             <div class="card-header bg-info text-white fw-bold">Personel Ayarları</div>
                             <div class="card-body">
                                 {% for setting in settings_user %}
@@ -91,6 +91,52 @@
                                 {% empty %}
                                     <div class="alert alert-warning">Veri yok! Lütfen yukarıdaki 'Ayarları Sıfırla' butonuna basın.</div>
                                 {% endfor %}
+                            </div>
+                        </div>
+                        
+                        <div class="card shadow-sm border-0">
+                            <div class="card-header bg-primary text-white fw-bold">Kullanıcı Rol Ekle/Çıkar</div>
+                            <div class="card-body">
+                                <form method="post" class="mb-3">
+                                    {% csrf_token %}
+                                    <div class="d-flex gap-2">
+                                        <input type="text" name="role_name" class="form-control" placeholder="Yeni rol adı (örn: Satış Temsilcisi)" required>
+                                        <button type="submit" name="add_role" class="btn btn-success">
+                                            <i class="fas fa-plus"></i> Ekle
+                                        </button>
+                                    </div>
+                                </form>
+                                
+                                <div class="table-responsive">
+                                    <table class="table table-hover">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Rol Adı</th>
+                                                <th class="text-end">İşlem</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for role in user_roles %}
+                                            <tr>
+                                                <td class="fw-bold">{{ role.name }}</td>
+                                                <td class="text-end">
+                                                    <form method="post" class="d-inline" onsubmit="return confirm('Bu rolü silmek istediğinize emin misiniz? Bu role atanmış kullanıcıların rolleri kaldırılacak.');">
+                                                        {% csrf_token %}
+                                                        <input type="hidden" name="role_id" value="{{ role.id }}">
+                                                        <button type="submit" name="delete_role" class="btn btn-sm btn-outline-danger">
+                                                            <i class="fas fa-trash"></i> Sil
+                                                        </button>
+                                                    </form>
+                                                </td>
+                                            </tr>
+                                            {% empty %}
+                                            <tr>
+                                                <td colspan="2" class="text-center text-muted">Henüz rol eklenmemiş.</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
                     </div>

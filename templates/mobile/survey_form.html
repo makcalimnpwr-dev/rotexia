@@ -660,23 +660,176 @@
         const form = document.getElementById('mainForm');
         if (form) {
             form.addEventListener('submit', function(e) {
+                e.preventDefault(); // Normal submit'i engelle
+                
                 const requiredPhotos = document.querySelectorAll('input[type="hidden"][data-required-photo="1"]');
                 let missing = 0;
                 requiredPhotos.forEach(function(h) {
                     if (!h.value || !h.value.startsWith('data:image/')) missing++;
                 });
                 if (missing > 0) {
-                    e.preventDefault();
                     Swal.fire({
                         icon: 'warning',
                         title: 'Zorunlu Fotoğraf Eksik',
                         html: 'Zorunlu fotoğraf sorusu işaretlenmemiş görünüyor.<br><br>' +
-                              'Eğer kamera açılıp “Tamam” dediğiniz halde fotoğraf gelmiyorsa bu APK (WebIntoApp WebView) kaynaklı olabilir.',
+                              'Eğer kamera açılıp "Tamam" dediğiniz halde fotoğraf gelmiyorsa bu APK (WebIntoApp WebView) kaynaklı olabilir.',
                         confirmButtonText: 'Tamam'
                     });
+                    return;
                 }
+                
+                // Form verilerini topla
+                const formData = new FormData(form);
+                formData.append('ajax', 'true');
+                
+                // AJAX ile gönder
+                fetch(form.action, {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Form verilerini localStorage'a kaydet (beklemede)
+                        const taskId = {{ task_id }};
+                        const surveyId = {{ survey_id }};
+                        const answers = {};
+                        
+                        // Tüm form verilerini topla
+                        document.querySelectorAll('.survey-input').forEach(function(inp) {
+                            if (inp.name && inp.name.startsWith('q_')) {
+                                const qId = inp.name.replace('q_', '').replace('_base64', '');
+                                if (!answers[qId]) {
+                                    answers[qId] = {};
+                                }
+                                if (inp.type === 'file' && inp.files && inp.files.length > 0) {
+                                    // File'ı base64'e çevir
+                                    const reader = new FileReader();
+                                    reader.onload = function(e) {
+                                        answers[qId].photo_base64 = e.target.result;
+                                        savePendingForm(taskId, surveyId, answers);
+                                    };
+                                    reader.readAsDataURL(inp.files[0]);
+                                } else if (inp.type === 'hidden' && inp.name.includes('_base64') && inp.value) {
+                                    answers[qId].photo_base64 = inp.value;
+                                } else if (inp.value) {
+                                    answers[qId].text = inp.value;
+                                }
+                            }
+                        });
+                        
+                        // Eğer fotoğraf yoksa hemen kaydet
+                        if (Object.keys(answers).length > 0) {
+                            let hasPhotos = false;
+                            for (let qId in answers) {
+                                if (answers[qId].photo_base64) {
+                                    hasPhotos = true;
+                                    break;
+                                }
+                            }
+                            if (!hasPhotos) {
+                                savePendingForm(taskId, surveyId, answers);
+                            }
+                        }
+                        
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Form Kaydedildi',
+                            text: 'Form verileri cihazda saklandı ve belirlenen sürede otomatik gönderilecek.',
+                            confirmButtonText: 'Tamam'
+                        }).then(() => {
+                            window.location.href = '{% url "mobile_task_detail" pk=task_id %}';
+                        });
+                    } else {
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Hata',
+                            text: data.message || 'Form kaydedilemedi.',
+                            confirmButtonText: 'Tamam'
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Hata',
+                        text: 'Form gönderilirken bir hata oluştu.',
+                        confirmButtonText: 'Tamam'
+                    });
+                });
             });
         }
+        
+        // Bekleyen form verilerini localStorage'a kaydet
+        function savePendingForm(taskId, surveyId, answers) {
+            const pendingForms = JSON.parse(localStorage.getItem('pending_forms') || '[]');
+            const existingIndex = pendingForms.findIndex(f => f.task_id === taskId && f.survey_id === surveyId);
+            
+            const formData = {
+                task_id: taskId,
+                survey_id: surveyId,
+                answers: answers,
+                timestamp: Date.now()
+            };
+            
+            if (existingIndex >= 0) {
+                pendingForms[existingIndex] = formData;
+            } else {
+                pendingForms.push(formData);
+            }
+            
+            localStorage.setItem('pending_forms', JSON.stringify(pendingForms));
+        }
+        
+        // Bekleyen form verilerini gönder
+        async function syncPendingForms() {
+            const pendingForms = JSON.parse(localStorage.getItem('pending_forms') || '[]');
+            if (pendingForms.length === 0) return;
+            
+            try {
+                const response = await fetch('{% url "mobile_sync_pending_data" %}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: JSON.stringify({ pending_forms: pendingForms })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    // Başarılı gönderilen formları localStorage'dan sil
+                    localStorage.removeItem('pending_forms');
+                    console.log(`${data.success_count} form gönderildi.`);
+                }
+            } catch (error) {
+                console.error('Form gönderim hatası:', error);
+            }
+        }
+        
+        // Veri paylaşma süresini al ve timer başlat
+        async function initSyncTimer() {
+            try {
+                const response = await fetch('{% url "api_get_data_sync_interval" %}');
+                const data = await response.json();
+                const intervalMinutes = data.interval_minutes || 15;
+                
+                // Timer başlat (dakika cinsinden)
+                setInterval(syncPendingForms, intervalMinutes * 60 * 1000);
+                
+                // Sayfa yüklendiğinde de bir kez dene
+                syncPendingForms();
+            } catch (error) {
+                console.error('Sync interval alınamadı:', error);
+            }
+        }
+        
+        // Sayfa yüklendiğinde timer'ı başlat
+        initSyncTimer();
     });
 </script>
 

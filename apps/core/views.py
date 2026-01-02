@@ -17,6 +17,7 @@ from django.http import HttpResponseForbidden
 from django.http import HttpResponse
 from apps.users.hierarchy_access import get_hierarchy_scope_for_user
 from apps.users.utils import ensure_root_admin_configured, get_assigned_user_ids_under_admin_node, is_root_admin
+from apps.users.models import UserRole
 
 
 # Gerekli Modeller
@@ -127,6 +128,10 @@ def settings_home(request):
                 'category': 'general', 'input_type': 'number', 'description': 'Veri alışverişi kaç dakikada bir yapılsın?'
             },
             {
+                'key': 'data_sync_interval_minutes', 'label': 'Veri Paylaşma Süresi (Dakika)', 'value': '15',
+                'category': 'general', 'input_type': 'number', 'description': 'Form verileri kaç dakikada bir otomatik gönderilsin? (Ziyaret başlatma gibi işlemler anlık gönderilir)'
+            },
+            {
                 'key': 'maintenance_mode', 'label': 'Bakım Modu', 'value': 'False',
                 'category': 'general', 'input_type': 'bool', 'description': 'Açılırsa sadece yöneticiler sisteme girebilir.'
             },
@@ -155,6 +160,29 @@ def settings_home(request):
 
     # --- 2. GÜNCELLEME İŞLEMİ ---
     if request.method == 'POST':
+        # Handle role add/delete
+        if 'add_role' in request.POST:
+            role_name = request.POST.get('role_name', '').strip()
+            if role_name:
+                if not UserRole.objects.filter(name=role_name).exists():
+                    UserRole.objects.create(name=role_name)
+                    messages.success(request, f'✅ Rol "{role_name}" eklendi.')
+                else:
+                    messages.warning(request, f'⚠️ Rol "{role_name}" zaten mevcut.')
+            else:
+                messages.error(request, '❌ Rol adı boş olamaz.')
+        elif 'delete_role' in request.POST:
+            role_id = request.POST.get('role_id')
+            if role_id:
+                try:
+                    role = UserRole.objects.get(id=role_id)
+                    role_name = role.name
+                    role.delete()
+                    messages.success(request, f'✅ Rol "{role_name}" silindi.')
+                except UserRole.DoesNotExist:
+                    messages.error(request, '❌ Rol bulunamadı.')
+        
+        # Handle regular settings update
         all_settings = SystemSetting.objects.all()
         for setting in all_settings:
             if setting.input_type == 'bool':
@@ -165,7 +193,9 @@ def settings_home(request):
             if new_val is not None:
                 setting.value = new_val
                 setting.save()
-        messages.success(request, '✅ Ayarlar kaydedildi.')
+        
+        if 'add_role' not in request.POST and 'delete_role' not in request.POST:
+            messages.success(request, '✅ Ayarlar kaydedildi.')
         return redirect('settings_home')
     
     # CASUS KOD BAŞLANGICI
@@ -186,11 +216,13 @@ def settings_home(request):
     settings_general = SystemSetting.objects.filter(category='general')
     settings_visit = SystemSetting.objects.filter(category='visit')
     settings_user = SystemSetting.objects.filter(category='user')
+    user_roles = UserRole.objects.all().order_by('name')
 
     context = {
         'settings_general': settings_general,
         'settings_visit': settings_visit,
         'settings_user': settings_user,
+        'user_roles': user_roles,
     }
     return render(request, 'apps/Core/settings.html', context)
 
@@ -668,6 +700,11 @@ def mobile_fill_survey(request, task_id, survey_id):
     all_questions = survey.questions.all().order_by('order')
 
     if request.method == 'POST':
+        # AJAX isteği mi kontrol et
+        immediate = request.POST.get('immediate', 'false') == 'true'
+        
+        # Eğer immediate değilse, localStorage'a kaydet (JavaScript tarafında yapılacak)
+        # Burada sadece normal form gönderimini işle
         try:
             # Her soru için döngüye girip cevabı alalım
             for q in all_questions:
@@ -710,10 +747,17 @@ def mobile_fill_survey(request, task_id, survey_id):
                         answer_photo=photo_val
                     )
             
+            # AJAX isteği ise JSON döndür
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.POST.get('ajax') == 'true':
+                return JsonResponse({'success': True, 'message': 'Form başarıyla kaydedildi.'})
+            
             messages.success(request, '✅ Form başarıyla kaydedildi.')
             return redirect('mobile_task_detail', pk=task_id)
             
         except Exception as e:
+            # AJAX isteği ise JSON döndür
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.POST.get('ajax') == 'true':
+                return JsonResponse({'success': False, 'message': f'Hata oluştu: {str(e)}'}, status=400)
             messages.error(request, f'Hata oluştu: {str(e)}')
 
     # Soruları ve alt sorularını hazırla
@@ -1179,6 +1223,87 @@ def get_wander_radius(request):
     setting = SystemSetting.objects.filter(key='wander_radius').first()
     wander_radius = float(setting.value) if setting else 500.0  # Varsayılan 500m
     return JsonResponse({'wander_radius': wander_radius})
+
+@csrf_exempt
+@login_required
+def get_data_sync_interval(request):
+    """Veri paylaşma süresini (dakika) döndürür"""
+    setting = SystemSetting.objects.filter(key='data_sync_interval_minutes').first()
+    interval = int(setting.value) if setting else 15  # Varsayılan 15 dakika
+    return JsonResponse({'interval_minutes': interval})
+
+@login_required
+def mobile_sync_pending_data(request):
+    """Bekleyen form verilerini hemen gönder"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'message': 'Sadece POST istekleri kabul edilir.'}, status=405)
+    
+    try:
+        # localStorage'dan bekleyen form verilerini al (JavaScript tarafından gönderilecek)
+        import json
+        data = json.loads(request.body) if request.body else {}
+        pending_forms = data.get('pending_forms', [])
+        
+        success_count = 0
+        error_count = 0
+        
+        for form_data in pending_forms:
+            try:
+                task_id = form_data.get('task_id')
+                survey_id = form_data.get('survey_id')
+                answers = form_data.get('answers', {})
+                
+                task = VisitTask.objects.get(pk=task_id, merch_code=request.user.username)
+                survey = Survey.objects.get(pk=survey_id)
+                
+                # Form verilerini kaydet
+                for q_id, answer_data in answers.items():
+                    question = Question.objects.get(pk=q_id, survey=survey)
+                    text_val = answer_data.get('text')
+                    photo_b64 = answer_data.get('photo_base64')
+                    
+                    # Eski cevabı sil
+                    SurveyAnswer.objects.filter(task=task, question=question).delete()
+                    
+                    # Fotoğraf varsa işle
+                    photo_val = None
+                    if photo_b64 and photo_b64.startswith('data:image/'):
+                        try:
+                            header, b64data = photo_b64.split(',', 1)
+                            ext = 'jpg'
+                            if 'image/png' in header:
+                                ext = 'png'
+                            elif 'image/webp' in header:
+                                ext = 'webp'
+                            
+                            import base64
+                            decoded = base64.b64decode(b64data)
+                            photo_val = ContentFile(decoded, name=f"survey_{task_id}_{q_id}.{ext}")
+                        except Exception:
+                            pass
+                    
+                    # Yeni cevabı kaydet
+                    if text_val or photo_val:
+                        SurveyAnswer.objects.create(
+                            task=task,
+                            question=question,
+                            answer_text=text_val,
+                            answer_photo=photo_val
+                        )
+                
+                success_count += 1
+            except Exception as e:
+                error_count += 1
+                print(f"Form gönderim hatası: {str(e)}")
+        
+        return JsonResponse({
+            'success': True,
+            'message': f'{success_count} form gönderildi.',
+            'success_count': success_count,
+            'error_count': error_count
+        })
+    except Exception as e:
+        return JsonResponse({'success': False, 'message': f'Hata: {str(e)}'}, status=500)
 
 @csrf_exempt
 @login_required

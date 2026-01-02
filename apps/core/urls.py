@@ -23,4 +23,6 @@ urlpatterns = [
     path('api/get-wander-radius/', views.get_wander_radius, name='api_get_wander_radius'),
     path('api/get-distance-rule/', views.get_distance_rule, name='api_get_distance_rule'),
     path('api/check-visit-status/<int:task_id>/', views.check_visit_status, name='api_check_visit_status'),
+    path('api/sync-pending-data/', views.mobile_sync_pending_data, name='mobile_sync_pending_data'),
+    path('api/get-sync-interval/', views.get_data_sync_interval, name='api_get_data_sync_interval'),
 ]

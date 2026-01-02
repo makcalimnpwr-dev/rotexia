@@ -235,7 +235,16 @@
                         </select>
                     </div>
                     <div class="mb-3"><label>Müşteri Kodu</label><input type="text" name="customer_code" class="form-control" required></div>
-                    <div class="mb-3"><label>Personel</label><input type="text" name="merch_code" class="form-control" required></div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Personel <span class="text-danger">*</span></label>
+                        <select name="merch_code" class="form-select" required>
+                            <option value="">Seçiniz...</option>
+                            {% for m in merchandisers %}
+                            <option value="{{ m }}">{{ m }}</option>
+                            {% endfor %}
+                        </select>
+                        <small class="text-muted">Sistemde olmayan kullanıcıya görev atanamaz.</small>
+                    </div>
                     <div class="mb-3"><label>Tarih</label><input type="date" name="planned_date" class="form-control" required></div>
                 </div>
                 <div class="modal-footer"><button type="submit" class="btn btn-primary">Oluştur</button></div>

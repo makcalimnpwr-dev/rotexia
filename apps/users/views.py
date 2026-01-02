@@ -1,7 +1,8 @@
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
-from .models import CustomUser, UserRole, UserFieldDefinition, AuthorityNode
+from .models import CustomUser, UserRole, UserFieldDefinition, AuthorityNode, UserMenuPermission
+from apps.forms.models import Survey
 from .forms import UserCreationForm, UserEditForm, RoleForm
 from .decorators import root_admin_required
 from .utils import ensure_root_admin_configured, get_admin_node, get_root_admin_user, is_root_admin
@@ -579,3 +580,66 @@ def hierarchy_users_for_authority(request):
         'success': True,
         'users': [{'id': u.id, 'name': f"{u.first_name} {u.last_name}".strip() or u.user_code, 'user_code': u.user_code} for u in qs]
     })
+
+@login_required
+@root_admin_required
+def hierarchy_get_menu_permissions(request):
+    """Kullanıcının menü izinlerini getir"""
+    user_id = request.GET.get('user_id')
+    if not user_id:
+        return JsonResponse({'success': False, 'message': 'user_id gerekli'}, status=400)
+    
+    try:
+        user = CustomUser.objects.get(pk=user_id)
+        permissions = {}
+        for perm in UserMenuPermission.objects.filter(user=user):
+            permissions[perm.menu_key] = {
+                'can_view': perm.can_view,
+                'can_edit': perm.can_edit
+            }
+        
+        # Anketleri de ekle
+        surveys = Survey.objects.all().order_by('title')
+        surveys_data = [{'id': s.id, 'title': s.title} for s in surveys]
+        
+        return JsonResponse({
+            'success': True, 
+            'permissions': permissions,
+            'surveys': surveys_data
+        })
+    except CustomUser.DoesNotExist:
+        return JsonResponse({'success': False, 'message': 'Kullanıcı bulunamadı'}, status=404)
+
+@login_required
+@require_POST
+@root_admin_required
+def hierarchy_save_menu_permissions(request):
+    """Kullanıcının menü izinlerini kaydet"""
+    try:
+        data = json.loads(request.body.decode('utf-8'))
+        user_id = data.get('user_id')
+        permissions = data.get('permissions', {})
+        
+        if not user_id:
+            return JsonResponse({'success': False, 'message': 'user_id gerekli'}, status=400)
+        
+        user = CustomUser.objects.get(pk=user_id)
+        
+        # Mevcut izinleri sil
+        UserMenuPermission.objects.filter(user=user).delete()
+        
+        # Yeni izinleri kaydet
+        for menu_key, perm_data in permissions.items():
+            UserMenuPermission.objects.create(
+                user=user,
+                menu_key=menu_key,
+                menu_label=perm_data.get('menu_label', menu_key),
+                can_view=perm_data.get('can_view', False),
+                can_edit=perm_data.get('can_edit', False)
+            )
+        
+        return JsonResponse({'success': True, 'message': 'İzinler kaydedildi'})
+    except CustomUser.DoesNotExist:
+        return JsonResponse({'success': False, 'message': 'Kullanıcı bulunamadı'}, status=404)
+    except Exception as e:
+        return JsonResponse({'success': False, 'message': str(e)}, status=500)

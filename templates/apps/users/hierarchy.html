@@ -11,7 +11,7 @@
 
   .hierarchy-wrap {
     display: grid;
-    grid-template-columns: 420px 1fr;
+    grid-template-columns: 320px 1fr;
     gap: 18px;
     align-items: start;
   }
@@ -85,22 +85,118 @@
   .node.active { background: #eff6ff; border-color: #bfdbfe; }
   .node.drop-target { background: #ecfeff; border-color: #22d3ee; }
 
-  /* Etiket (pill) */
+  /* Etiket (pill) - Yetki bazlı renkler */
   .node .badge {
-    font-size: 13px;
-    padding: 9px 12px;
+    font-size: 12px;
+    padding: 8px 10px;
     border-radius: 999px;
     font-weight: 700;
     letter-spacing: .2px;
-    background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
-    box-shadow: 0 10px 22px rgba(37, 99, 235, 0.18);
     max-width: 100%;
     white-space: normal;
     line-height: 1.1;
   }
-  .node.active .badge {
+  
+  /* Admin - Kırmızı */
+  .node[data-authority="Admin"] .badge {
+    background: linear-gradient(135deg, #dc3545, #c82333) !important;
+    box-shadow: 0 10px 22px rgba(220, 53, 69, 0.18);
+  }
+  .node[data-authority="Admin"].active .badge {
+    background: linear-gradient(135deg, #c82333, #bd2130) !important;
+  }
+  
+  /* Proje Müdürü - Mor */
+  .node[data-authority="Proje Müdürü"] .badge {
+    background: linear-gradient(135deg, #6f42c1, #5a32a3) !important;
+    box-shadow: 0 10px 22px rgba(111, 66, 193, 0.18);
+  }
+  .node[data-authority="Proje Müdürü"].active .badge {
+    background: linear-gradient(135deg, #5a32a3, #4e2a8f) !important;
+  }
+  
+  /* Proje Sorumlusu - Turuncu */
+  .node[data-authority="Proje Sorumlusu"] .badge {
+    background: linear-gradient(135deg, #fd7e14, #e66a00) !important;
+    box-shadow: 0 10px 22px rgba(253, 126, 20, 0.18);
+  }
+  .node[data-authority="Proje Sorumlusu"].active .badge {
+    background: linear-gradient(135deg, #e66a00, #cc5f00) !important;
+  }
+  
+  /* Bölge Sorumlusu - Yeşil */
+  .node[data-authority="Bölge Sorumlusu"] .badge {
+    background: linear-gradient(135deg, #198754, #157347) !important;
+    box-shadow: 0 10px 22px rgba(25, 135, 84, 0.18);
+  }
+  .node[data-authority="Bölge Sorumlusu"].active .badge {
+    background: linear-gradient(135deg, #157347, #146c43) !important;
+  }
+  
+  /* Supervisor - Mavi */
+  .node[data-authority="Supervisor"] .badge {
+    background: linear-gradient(135deg, #0dcaf0, #0aa2c0) !important;
+    box-shadow: 0 10px 22px rgba(13, 202, 240, 0.18);
+  }
+  .node[data-authority="Supervisor"].active .badge {
+    background: linear-gradient(135deg, #0aa2c0, #0989a6) !important;
+  }
+  
+  /* Satış Sorumlusu - Pembe */
+  .node[data-authority="Satış Sorumlusu"] .badge {
+    background: linear-gradient(135deg, #d63384, #b02a5b) !important;
+    box-shadow: 0 10px 22px rgba(214, 51, 132, 0.18);
+  }
+  .node[data-authority="Satış Sorumlusu"].active .badge {
+    background: linear-gradient(135deg, #b02a5b, #9a2450) !important;
+  }
+  
+  /* Saha Ekibi - Sarı */
+  .node[data-authority="Saha Ekibi"] .badge {
+    background: linear-gradient(135deg, #ffc107, #e0a800) !important;
+    box-shadow: 0 10px 22px rgba(255, 193, 7, 0.18);
+    color: #000 !important;
+  }
+  .node[data-authority="Saha Ekibi"].active .badge {
+    background: linear-gradient(135deg, #e0a800, #cc9900) !important;
+  }
+  
+  /* Uzman - Teal */
+  .node[data-authority="Uzman"] .badge {
+    background: linear-gradient(135deg, #20c997, #1aa179) !important;
+    box-shadow: 0 10px 22px rgba(32, 201, 151, 0.18);
+  }
+  .node[data-authority="Uzman"].active .badge {
+    background: linear-gradient(135deg, #1aa179, #178869) !important;
+  }
+  
+  /* Günlükçü Personel - Gri */
+  .node[data-authority="Günlükçü Personel"] .badge {
+    background: linear-gradient(135deg, #6c757d, #5a6268) !important;
+    box-shadow: 0 10px 22px rgba(108, 117, 125, 0.18);
+  }
+  .node[data-authority="Günlükçü Personel"].active .badge {
+    background: linear-gradient(135deg, #5a6268, #495057) !important;
+  }
+  
+  /* Müşteri - İndigo */
+  .node[data-authority="Müşteri"] .badge {
+    background: linear-gradient(135deg, #6610f2, #520dc2) !important;
+    box-shadow: 0 10px 22px rgba(102, 16, 242, 0.18);
+  }
+  .node[data-authority="Müşteri"].active .badge {
+    background: linear-gradient(135deg, #520dc2, #450ba8) !important;
+  }
+  
+  /* Varsayılan - Mavi (diğer yetkiler için) */
+  .node:not([data-authority]) .badge,
+  .node[data-authority=""] .badge {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+    box-shadow: 0 10px 22px rgba(37, 99, 235, 0.18);
+  }
+  .node:not([data-authority]).active .badge,
+  .node[data-authority=""].active .badge {
     background: linear-gradient(135deg, #1d4ed8, #1e40af) !important;
-    box-shadow: 0 12px 26px rgba(37, 99, 235, 0.22);
   }
 
   /* Context menu */
@@ -152,6 +248,16 @@
         <span class="badge bg-light text-dark border" id="userCount">0</span>
       </div>
       <div class="list-group" id="assignedUsers"></div>
+    </div>
+    
+    <!-- Menü İzinleri Bölümü -->
+    <div id="menuPermissionsSection" style="display: none;">
+      <hr class="my-4">
+      <h6 class="fw-bold mb-3">Menü İzinleri</h6>
+      <div id="menuPermissionsList"></div>
+      <button class="btn btn-primary btn-sm mt-3" onclick="saveMenuPermissions()">
+        <i class="fas fa-save me-1"></i> İzinleri Kaydet
+      </button>
     </div>
     </div>
   </div>
@@ -289,6 +395,7 @@
     const div = document.createElement('div');
     div.className = 'node';
     div.dataset.nodeId = String(node.id);
+    div.dataset.authority = node.authority || '';
     div.innerHTML = `<span class="badge bg-primary">${escapeHtml(nodeTitle(node))}</span>`;
     div.addEventListener('click', () => selectNode(node.id));
     div.addEventListener('contextmenu', (e) => {
@@ -408,8 +515,10 @@
   function refreshAssignedUsers() {
     const box = document.getElementById('assignedUsers');
     const count = document.getElementById('userCount');
+    const menuSection = document.getElementById('menuPermissionsSection');
     box.innerHTML = '';
     count.textContent = '0';
+    menuSection.style.display = 'none';
     if (!selectedNodeId) return;
 
     const node = NODES.find(n => n.id === selectedNodeId);
@@ -423,11 +532,270 @@
       el.className = 'list-group-item d-flex justify-content-between align-items-center';
       el.innerHTML = `<div><strong>${escapeHtml(display)}</strong><div class="small text-muted">${escapeHtml(node.assigned_user__user_code || '')}</div></div>`;
       box.appendChild(el);
+      
+      // Menü izinleri bölümünü göster
+      menuSection.style.display = 'block';
+      loadMenuPermissions(node.assigned_user_id);
     } else {
       const el = document.createElement('div');
       el.className = 'text-muted small';
       el.textContent = 'Bu düğüme henüz kullanıcı atanmadı.';
       box.appendChild(el);
+    }
+  }
+  
+  // Menü yapısı (base.html'den alınan menüler)
+  const MENU_STRUCTURE = [
+    { key: 'customers', label: 'Müşteriler', icon: 'fa-store' },
+    { key: 'tasks', label: 'Görevler', icon: 'fa-tasks' },
+    { key: 'routes', label: 'Rota Planı', icon: 'fa-route' },
+    { key: 'surveys', label: 'Formlar', icon: 'fa-clipboard-check', hasChildren: true },
+    { key: 'visuals', label: 'Görseller', icon: 'fa-images' },
+    { 
+      key: 'reports', 
+      label: 'Raporlar', 
+      icon: 'fa-chart-line',
+      children: [
+        { key: 'reports_detail', label: 'Detaylı Ziyaret Raporu', icon: 'fa-file-alt' },
+        { key: 'reports_daily', label: 'Günlük Ziyaret Özeti', icon: 'fa-chart-pie' },
+        { key: 'reports_survey', label: 'Anket Raporları', icon: 'fa-clipboard-list', hasChildren: true }
+      ]
+    },
+    { key: 'trash', label: 'Çöp Kutusu', icon: 'fa-trash' }
+  ];
+  
+  let currentUserId = null;
+  let menuPermissions = {};
+  let surveysList = [];
+  
+  async function loadMenuPermissions(userId) {
+    currentUserId = userId;
+    const listEl = document.getElementById('menuPermissionsList');
+    listEl.innerHTML = '';
+    
+    try {
+      const response = await fetch(`{% url 'hierarchy_get_menu_permissions' %}?user_id=${userId}`);
+      const data = await response.json();
+      menuPermissions = data.permissions || {};
+      surveysList = data.surveys || [];
+      
+      // Menü yapısını render et
+      MENU_STRUCTURE.forEach(menu => {
+        const menuItem = document.createElement('div');
+        menuItem.className = 'card mb-2';
+        menuItem.innerHTML = `
+          <div class="card-body p-3">
+            <div class="d-flex justify-content-between align-items-center">
+              <div class="d-flex align-items-center flex-grow-1">
+                <strong class="me-3">
+                  <i class="fas ${menu.icon} me-2"></i>${menu.label}
+                </strong>
+                <div class="form-check form-check-inline">
+                  <input class="form-check-input" type="checkbox" id="view-${menu.key}" 
+                    ${menuPermissions[menu.key]?.can_view ? 'checked' : ''}>
+                  <label class="form-check-label" for="view-${menu.key}">
+                    Görme
+                  </label>
+                </div>
+                <div class="form-check form-check-inline ms-2">
+                  <input class="form-check-input" type="checkbox" id="edit-${menu.key}" 
+                    ${menuPermissions[menu.key]?.can_edit ? 'checked' : ''}>
+                  <label class="form-check-label" for="edit-${menu.key}">
+                    Düzenleme
+                  </label>
+                </div>
+              </div>
+              ${(menu.children || menu.hasChildren) ? `
+                <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#menu-${menu.key}">
+                  <i class="fas fa-chevron-down"></i>
+                </button>
+              ` : ''}
+            </div>
+            ${menu.hasChildren && menu.key === 'surveys' ? `
+              <div class="collapse mt-2" id="menu-${menu.key}">
+                ${surveysList.map(survey => `
+                  <div class="d-flex justify-content-between align-items-center ms-4 mb-2">
+                    <div class="d-flex align-items-center">
+                      <i class="fas fa-clipboard-list me-2 text-muted"></i>
+                      <span>${escapeHtml(survey.title)}</span>
+                    </div>
+                    <div class="d-flex align-items-center">
+                      <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="view-survey-${survey.id}" 
+                          ${menuPermissions[`survey_${survey.id}`]?.can_view ? 'checked' : ''}>
+                        <label class="form-check-label" for="view-survey-${survey.id}">
+                          Görme
+                        </label>
+                      </div>
+                      <div class="form-check form-check-inline ms-2">
+                        <input class="form-check-input" type="checkbox" id="edit-survey-${survey.id}" 
+                          ${menuPermissions[`survey_${survey.id}`]?.can_edit ? 'checked' : ''}>
+                        <label class="form-check-label" for="edit-survey-${survey.id}">
+                          Düzenleme
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+            ${menu.children ? `
+              <div class="collapse mt-2" id="menu-${menu.key}">
+                ${menu.children.map(child => `
+                  <div class="d-flex justify-content-between align-items-center ms-4 mb-2">
+                    <div class="d-flex align-items-center">
+                      <i class="fas ${child.icon} me-2 text-muted"></i>
+                      <span>${child.label}</span>
+                    </div>
+                    <div class="d-flex align-items-center">
+                      <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="view-${child.key}" 
+                          ${menuPermissions[child.key]?.can_view ? 'checked' : ''}>
+                        <label class="form-check-label" for="view-${child.key}">
+                          Görme
+                        </label>
+                      </div>
+                      <div class="form-check form-check-inline ms-2">
+                        <input class="form-check-input" type="checkbox" id="edit-${child.key}" 
+                          ${menuPermissions[child.key]?.can_edit ? 'checked' : ''}>
+                        <label class="form-check-label" for="edit-${child.key}">
+                          Düzenleme
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                  ${child.hasChildren && child.key === 'reports_survey' ? `
+                    <div class="ms-4 mb-2">
+                      <button class="btn btn-sm btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#reports-survey-list">
+                        <i class="fas fa-chevron-down"></i> Anketleri Göster
+                      </button>
+                      <div class="collapse mt-2" id="reports-survey-list">
+                        ${surveysList.map(survey => `
+                          <div class="d-flex justify-content-between align-items-center ms-4 mb-2">
+                            <div class="d-flex align-items-center">
+                              <i class="fas fa-clipboard-list me-2 text-muted" style="font-size: 0.9em;"></i>
+                              <span style="font-size: 0.9em;">${escapeHtml(survey.title)}</span>
+                            </div>
+                            <div class="d-flex align-items-center">
+                              <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="view-reports-survey-${survey.id}" 
+                                  ${menuPermissions[`reports_survey_${survey.id}`]?.can_view ? 'checked' : ''}>
+                                <label class="form-check-label" for="view-reports-survey-${survey.id}" style="font-size: 0.9em;">
+                                  Görme
+                                </label>
+                              </div>
+                              <div class="form-check form-check-inline ms-2">
+                                <input class="form-check-input" type="checkbox" id="edit-reports-survey-${survey.id}" 
+                                  ${menuPermissions[`reports_survey_${survey.id}`]?.can_edit ? 'checked' : ''}>
+                                <label class="form-check-label" for="edit-reports-survey-${survey.id}" style="font-size: 0.9em;">
+                                  Düzenleme
+                                </label>
+                              </div>
+                            </div>
+                          </div>
+                        `).join('')}
+                      </div>
+                    </div>
+                  ` : ''}
+                `).join('')}
+              </div>
+            ` : ''}
+          </div>
+        `;
+        listEl.appendChild(menuItem);
+      });
+    } catch (error) {
+      console.error('Menü izinleri yüklenemedi:', error);
+    }
+  }
+  
+  async function saveMenuPermissions() {
+    if (!currentUserId) return;
+    
+    const permissions = {};
+    MENU_STRUCTURE.forEach(menu => {
+      const viewChecked = document.getElementById(`view-${menu.key}`)?.checked || false;
+      const editChecked = document.getElementById(`edit-${menu.key}`)?.checked || false;
+      
+      if (viewChecked || editChecked) {
+        permissions[menu.key] = {
+          menu_key: menu.key,
+          menu_label: menu.label,
+          can_view: viewChecked,
+          can_edit: editChecked
+        };
+      }
+      
+      // Formlar altındaki anketler
+      if (menu.hasChildren && menu.key === 'surveys') {
+        surveysList.forEach(survey => {
+          const surveyViewChecked = document.getElementById(`view-survey-${survey.id}`)?.checked || false;
+          const surveyEditChecked = document.getElementById(`edit-survey-${survey.id}`)?.checked || false;
+          
+          if (surveyViewChecked || surveyEditChecked) {
+            permissions[`survey_${survey.id}`] = {
+              menu_key: `survey_${survey.id}`,
+              menu_label: survey.title,
+              can_view: surveyViewChecked,
+              can_edit: surveyEditChecked
+            };
+          }
+        });
+      }
+      
+      if (menu.children) {
+        menu.children.forEach(child => {
+          const childViewChecked = document.getElementById(`view-${child.key}`)?.checked || false;
+          const childEditChecked = document.getElementById(`edit-${child.key}`)?.checked || false;
+          
+          if (childViewChecked || childEditChecked) {
+            permissions[child.key] = {
+              menu_key: child.key,
+              menu_label: child.label,
+              can_view: childViewChecked,
+              can_edit: childEditChecked
+            };
+          }
+          
+          // Anket Raporları altındaki anketler
+          if (child.hasChildren && child.key === 'reports_survey') {
+            surveysList.forEach(survey => {
+              const reportSurveyViewChecked = document.getElementById(`view-reports-survey-${survey.id}`)?.checked || false;
+              const reportSurveyEditChecked = document.getElementById(`edit-reports-survey-${survey.id}`)?.checked || false;
+              
+              if (reportSurveyViewChecked || reportSurveyEditChecked) {
+                permissions[`reports_survey_${survey.id}`] = {
+                  menu_key: `reports_survey_${survey.id}`,
+                  menu_label: survey.title,
+                  can_view: reportSurveyViewChecked,
+                  can_edit: reportSurveyEditChecked
+                };
+              }
+            });
+          }
+        });
+      }
+    });
+    
+    try {
+      const response = await fetch("{% url 'hierarchy_save_menu_permissions' %}", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+        body: JSON.stringify({ user_id: currentUserId, permissions: permissions })
+      });
+      const data = await response.json();
+      if (data.success) {
+        if (hasSwal()) {
+          Swal.fire({ icon: 'success', title: 'Başarılı', text: 'Menü izinleri kaydedildi.' });
+        } else {
+          alert('Menü izinleri kaydedildi.');
+        }
+      } else {
+        showError('Hata', data.message || 'İzinler kaydedilemedi.');
+      }
+    } catch (error) {
+      console.error('İzinler kaydedilemedi:', error);
+      showError('Hata', 'İzinler kaydedilirken bir hata oluştu.');
     }
   }
 

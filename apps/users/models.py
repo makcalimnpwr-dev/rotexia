@@ -110,3 +110,26 @@ class AuthorityNode(models.Model):
         if self.label:
             return f"{self.label} ({self.authority})"
         return self.authority
+
+
+class UserMenuPermission(models.Model):
+    """Kullanıcı menü izinleri (görme/düzenleme)"""
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='menu_permissions',
+        verbose_name="Kullanıcı"
+    )
+    menu_key = models.CharField(max_length=100, verbose_name="Menü Anahtarı")
+    menu_label = models.CharField(max_length=200, verbose_name="Menü Etiketi")
+    can_view = models.BooleanField(default=False, verbose_name="Görebilir")
+    can_edit = models.BooleanField(default=False, verbose_name="Düzenleyebilir")
+    
+    class Meta:
+        verbose_name = "Kullanıcı Menü İzni"
+        verbose_name_plural = "Kullanıcı Menü İzinleri"
+        unique_together = ['user', 'menu_key']
+        ordering = ['menu_key']
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.menu_label}"

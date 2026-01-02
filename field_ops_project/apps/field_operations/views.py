@@ -22,6 +22,21 @@ from apps.customers.models import Customer
 User = get_user_model()
 CYCLE_START_DATE = date(2025, 12, 22)
 
+def _resolve_merch_to_username(raw_merch):
+    """
+    Accepts username or user_code, returns canonical username.
+    """
+    if raw_merch is None:
+        return None
+    s = str(raw_merch).strip()
+    if not s or s.lower() == "nan":
+        return None
+    u = User.objects.filter(username__iexact=s).first()
+    if u:
+        return u.username
+    u = User.objects.filter(user_code__iexact=s).first()
+    return u.username if u else None
+
 # --- 1. GÖREV LİSTESİ ---
 @login_required
 def task_list(request):
@@ -172,7 +187,11 @@ def import_tasks(request):
                             task.planned_date = p_date
                             task.cycle_day = c_day
                         excel_merch = row.get('Personel') or row.get('Personel Kodu')
-                        if excel_merch: task.merch_code = str(excel_merch).strip()
+                        if excel_merch:
+                            resolved = _resolve_merch_to_username(str(excel_merch).strip())
+                            if not resolved:
+                                continue
+                            task.merch_code = resolved
                         if 'Ziyaret Notu' in cols: task.visit_note = row.get('Ziyaret Notu')
                         task.save()
                         updated_count += 1
@@ -183,8 +202,11 @@ def import_tasks(request):
                     if cust_code and merch:
                         try:
                             customer = Customer.objects.get(customer_code=str(cust_code).strip())
+                            resolved = _resolve_merch_to_username(str(merch).strip())
+                            if not resolved:
+                                continue
                             VisitTask.objects.create(
-                                customer=customer, merch_code=str(merch).strip(), 
+                                customer=customer, merch_code=resolved, 
                                 planned_date=p_date, cycle_day=c_day, status='pending'
                             )
                             created_count += 1

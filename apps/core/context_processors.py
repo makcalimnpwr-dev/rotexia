@@ -22,7 +22,10 @@ def tenant_context(request):
         
         # 127.0.0.1 veya localhost ise session'dan tenant al
         if host_without_port in ['127.0.0.1', 'localhost']:
-            tenant_id = request.session.get('tenant_id')
+            tenant_id = request.session.get('tenant_id') or request.session.get('connect_tenant_id')
+            admin_from_panel = request.session.get('admin_from_panel', False)
+            
+            # Admin panelinden bağlanıldıysa veya normal session varsa tenant'ı al
             if tenant_id:
                 try:
                     tenant = Tenant.objects.get(id=tenant_id, is_active=True)
@@ -30,6 +33,7 @@ def tenant_context(request):
                     request.tenant = tenant
                 except Tenant.DoesNotExist:
                     request.session.pop('tenant_id', None)
+                    request.session.pop('connect_tenant_id', None)
     
     # Subdomain kontrolü - admin panelinde miyiz?
     is_admin_panel = False

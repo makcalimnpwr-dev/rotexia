@@ -74,12 +74,11 @@ class TenantMiddleware(MiddlewareMixin):
                     tenant = None
         else:
             # Subdomain yok (localhost veya IP adresi - development)
-            # Development modunda session'dan tenant_id'yi oku (admin panelinden bağlanıldıysa)
-            tenant_id = request.session.get('tenant_id')
-            admin_from_panel = request.session.get('admin_from_panel', False)
+            # Development modunda session'dan tenant_id'yi oku
+            tenant_id = request.session.get('tenant_id') or request.session.get('connect_tenant_id')
             
-            if tenant_id and admin_from_panel:
-                # Admin panelinden bağlanıldıysa, session'dan tenant'ı al
+            if tenant_id:
+                # Session'dan tenant'ı al (admin panelinden veya normal login'den)
                 try:
                     tenant = Tenant.objects.get(id=tenant_id, is_active=True)
                 except Tenant.DoesNotExist:
@@ -88,11 +87,8 @@ class TenantMiddleware(MiddlewareMixin):
                         request.session.pop(key, None)
                     tenant = None
             else:
-                # Normal durumda (subdomain-only mod)
+                # Normal durumda tenant yok
                 tenant = None
-                # Session temizle (subdomain-only mod) - sadece admin_from_panel yoksa
-                if not admin_from_panel and 'tenant_id' in request.session:
-                    del request.session['tenant_id']
         
         # Request'e ekle
         request.tenant = tenant

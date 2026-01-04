@@ -109,18 +109,30 @@ def settings_home(request):
     """
     # Middleware'den gelen tenant bilgisini kontrol et (subdomain-only mod)
     tenant = getattr(request, 'tenant', None)
+    
+    # Development modunda session'dan tenant al
+    if not tenant:
+        tenant_id = request.session.get('tenant_id') or request.session.get('connect_tenant_id')
+        if tenant_id:
+            try:
+                tenant = Tenant.objects.get(id=tenant_id, is_active=True)
+                request.tenant = tenant
+            except Tenant.DoesNotExist:
+                pass
+    
     host = request.get_host()
     host_without_port = host.split(':')[0] if ':' in host else host
     
     # Subdomain kontrolü
     is_admin_subdomain = False
-    if '.' in host_without_port:
+    if '.' in host_without_port and host_without_port not in ['127.0.0.1', 'localhost']:
         parts = host_without_port.split('.')
         subdomain = parts[0].lower()
         is_admin_subdomain = (subdomain == 'admin')
     
     # Admin subdomain'inde veya tenant yoksa -> admin ayarları
-    if is_admin_subdomain or not tenant:
+    admin_from_panel = request.session.get('admin_from_panel', False)
+    if is_admin_subdomain or (not tenant and not admin_from_panel):
         if is_root_admin(request.user):
             return redirect('admin_settings')
         else:
@@ -239,17 +251,24 @@ def tenant_settings(request):
     # Önce request.tenant'ı kontrol et (middleware'den)
     tenant = getattr(request, 'tenant', None)
     
-    # Eğer request.tenant yoksa, session'dan al
-    if not tenant and 'tenant_id' in request.session:
-        try:
-            tenant = Tenant.objects.get(id=request.session['tenant_id'], is_active=True)
-        except Tenant.DoesNotExist:
-            del request.session['tenant_id']
-            tenant = None
+    # Eğer request.tenant yoksa, session'dan al (development modu için)
+    if not tenant:
+        tenant_id = request.session.get('tenant_id') or request.session.get('connect_tenant_id')
+        if tenant_id:
+            try:
+                tenant = Tenant.objects.get(id=tenant_id, is_active=True)
+                # Request'e de ekle (middleware için)
+                request.tenant = tenant
+            except Tenant.DoesNotExist:
+                request.session.pop('tenant_id', None)
+                request.session.pop('connect_tenant_id', None)
+                tenant = None
     
     # Hala tenant yoksa, get_current_tenant'ı kullan (fallback)
     if not tenant:
         tenant = get_current_tenant(request)
+        if tenant:
+            request.tenant = tenant
     
     if not tenant:
         messages.error(request, '❌ Firma seçimi yapılmamış! Lütfen üst menüden bir firma seçin.')
@@ -493,17 +512,17 @@ def home(request):
     # Subdomain yoksa (development - localhost:8000 veya 127.0.0.1:8000)
     if not has_subdomain:
         # Middleware zaten session'dan tenant'ı okumuş olmalı
+        # Ama eğer okumadıysa, session'dan tekrar oku
         if not tenant:
-            # Admin panelinden bağlanıldıysa session'dan tenant'ı tekrar oku
-            admin_from_panel = request.session.get('admin_from_panel', False)
-            if admin_from_panel:
-                tenant_id = request.session.get('tenant_id') or request.session.get('connect_tenant_id')
-                if tenant_id:
-                    try:
-                        tenant = Tenant.objects.get(id=tenant_id, is_active=True)
-                        request.tenant = tenant  # Request'e ekle
-                    except Tenant.DoesNotExist:
-                        pass
+            tenant_id = request.session.get('tenant_id') or request.session.get('connect_tenant_id')
+            if tenant_id:
+                try:
+                    tenant = Tenant.objects.get(id=tenant_id, is_active=True)
+                    request.tenant = tenant  # Request'e ekle
+                except Tenant.DoesNotExist:
+                    # Geçersiz tenant_id, session'dan temizle
+                    request.session.pop('tenant_id', None)
+                    request.session.pop('connect_tenant_id', None)
             
             # Hala tenant yoksa ana sayfaya yönlendir
             if not tenant:
@@ -1141,6 +1160,11 @@ class CustomLoginView(LoginView):
             
             # Session'a tenant bilgisini kaydet (development'ta subdomain olmadığı için gerekli)
             request.session['tenant_id'] = tenant.id
+            # connect_tenant_id'yi de koru (middleware için)
+            request.session['connect_tenant_id'] = tenant.id
+            request.session['connect_tenant_slug'] = tenant.slug
+            request.session.modified = True
+            request.session.save()
             
             # Admin panelinden bağlanıldıysa, admin_from_panel flag'ini kaldır
             if request.session.get('admin_from_panel'):
@@ -1150,9 +1174,10 @@ class CustomLoginView(LoginView):
             for key in ['from_tenant_logout', 'logout_tenant_slug', 'logout_tenant_name']:
                 request.session.pop(key, None)
             
-            # Bağlanma session bilgilerini temizle (artık gerekli değil)
-            for key in ['connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name']:
-                request.session.pop(key, None)
+            # Bağlanma session bilgilerini temizleme - tenant_id'yi koruyoruz
+            # Sadece gereksiz olanları temizle
+            request.session.pop('connect_tenant_color', None)
+            request.session.pop('connect_tenant_name', None)
 
             # Development'ta subdomain kullanmıyoruz, direkt home'a yönlendir
             # Production'da subdomain kullanılabilir

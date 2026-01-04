@@ -28,6 +28,7 @@ from apps.core.models import SystemSetting
 from apps.customers.models import Customer, CustomerCari
 from apps.customers.models import CustomFieldDefinition
 from apps.users.hierarchy_access import get_hierarchy_scope_for_user
+from apps.core.tenant_utils import filter_by_tenant, set_tenant_on_save, get_current_tenant
 from apps.users.models import AuthorityNode
 from apps.core.excel_utils import xlsx_from_rows, xlsx_to_rows
 
@@ -109,7 +110,7 @@ def task_list(request):
     # NOT: Otomatik oluşturma fonksiyonunu buradan kaldırdık. 
     # Artık sildiğin görevler hortlamayacak.
 
-    tasks = VisitTask.objects.all().select_related('customer', 'visit_type').order_by('planned_date')
+    tasks = filter_by_tenant(VisitTask.objects.all(), request).select_related('customer', 'visit_type').order_by('planned_date')
 
     # Hiyerarşi bazlı yetkilendirme: Admin değilse sadece kendi + altının görevleri
     scope = get_hierarchy_scope_for_user(request.user, include_self=True)
@@ -206,7 +207,7 @@ def task_map_view(request):
 
     if selected_ids:
         id_list = selected_ids.split(',')
-        tasks = VisitTask.objects.filter(id__in=id_list, customer__latitude__isnull=False).select_related('customer')
+        tasks = filter_by_tenant(VisitTask.objects.all(), request).filter(id__in=id_list, customer__latitude__isnull=False).select_related('customer')
         
         for t in tasks:
             if t.customer.latitude and t.customer.longitude:
@@ -276,7 +277,7 @@ def import_tasks(request):
                 # Güncelle veya Ekle
                 if task_id:
                     try:
-                        task = VisitTask.objects.get(id=task_id)
+                        task = get_object_or_404(filter_by_tenant(VisitTask.objects.all(), request), id=task_id)
                         if 'Tarih' in cols:
                             task.planned_date = p_date
                             task.cycle_day = c_day
@@ -298,7 +299,7 @@ def import_tasks(request):
                     merch = row.get('Personel') or row.get('Personel Kodu')
                     if cust_code and merch:
                         try:
-                            customer = Customer.objects.get(customer_code=str(cust_code).strip())
+                            customer = get_object_or_404(filter_by_tenant(Customer.objects.all(), request), customer_code=str(cust_code).strip())
                             resolved = _resolve_merch_to_username(str(merch).strip())
                             if not resolved:
                                 invalid_merch_count += 1
@@ -306,10 +307,12 @@ def import_tasks(request):
                             if not _username_allowed_by_scope(scope, resolved):
                                 blocked_merch_count += 1
                                 continue
-                            VisitTask.objects.create(
+                            task = VisitTask(
                                 customer=customer, merch_code=resolved, 
                                 planned_date=p_date, cycle_day=c_day, status='pending'
                             )
+                            set_tenant_on_save(task, request)
+                            task.save()
                             created_count += 1
                         except Customer.DoesNotExist: pass
             
@@ -332,7 +335,7 @@ def import_tasks(request):
 @login_required
 def export_tasks(request):
     # Export zaten GET parametreleriyle çalıştığı için değişime gerek yok
-    tasks = VisitTask.objects.all().select_related('customer', 'visit_type').order_by('planned_date')
+    tasks = filter_by_tenant(VisitTask.objects.all(), request).select_related('customer', 'visit_type').order_by('planned_date')
     
     # Filtreleri tekrar uygula (Aynı mantık)
     f_search = request.GET.get('search', '')
@@ -416,7 +419,7 @@ def bulk_task_action(request):
             messages.warning(request, "Seçim yapılmadı.")
             return HttpResponseRedirect(referer)
 
-        tasks = VisitTask.objects.filter(id__in=selected_ids)
+        tasks = filter_by_tenant(VisitTask.objects.all(), request).filter(id__in=selected_ids)
         count = tasks.count()
 
         if action_type == 'delete':
@@ -494,7 +497,7 @@ def generate_daily_tasks(request):
     print(f"ARANAN DÖNGÜ GÜNÜ: {cycle_day}")
     # -------------------------------
 
-    all_routes = RoutePlan.objects.all()
+    all_routes = filter_by_tenant(RoutePlan.objects.all(), request)
     invalid_merch_routes = 0
     count = 0
     
@@ -516,20 +519,22 @@ def generate_daily_tasks(request):
             
             # Sadece EKSİK olanları tamamla
             # Hem tarih hem de personel kontrolü yap (aynı müşteri + tarih + personel kombinasyonu)
-            exists = VisitTask.objects.filter(
+            exists = filter_by_tenant(VisitTask.objects.all(), request).filter(
                 customer=route.customer, 
                 planned_date=target_date,
                 merch_code=resolved
             ).exclude(status='cancelled').exists()
             
             if not exists:
-                VisitTask.objects.create(
+                task = VisitTask(
                     customer=route.customer, 
                     merch_code=resolved, 
-                    planned_date=target_date, 
-                    cycle_day=cycle_day, 
+                    planned_date=target_date,
+                    cycle_day=cycle_day,
                     status='pending'
                 )
+                set_tenant_on_save(task, request)
+                task.save()
                 count += 1
                 print(f"[EKLEME] Müşteri: {route.customer.name} -> {resolved} (Rotasında {found_days} var)")
             else:
@@ -559,7 +564,7 @@ def create_manual_task(request):
         visit_type_id = request.POST.get('visit_type')
         
         try:
-            customer = Customer.objects.get(customer_code=customer_code)
+            customer = get_object_or_404(filter_by_tenant(Customer.objects.all(), request), customer_code=customer_code)
             scope = get_hierarchy_scope_for_user(request.user, include_self=True)
             resolved = _resolve_merch_to_username(merch_code)
             if not resolved:
@@ -578,7 +583,9 @@ def create_manual_task(request):
             v_type = None
             if visit_type_id: v_type = VisitType.objects.get(id=visit_type_id)
 
-            VisitTask.objects.create(customer=customer, merch_code=resolved, planned_date=p_date, cycle_day=c_day, status='pending', visit_type=v_type)
+            task = VisitTask(customer=customer, merch_code=resolved, planned_date=p_date, cycle_day=c_day, status='pending', visit_type=v_type)
+            set_tenant_on_save(task, request)
+            task.save()
             messages.success(request, "Görev oluşturuldu.")
         except Exception as e: messages.error(request, str(e))
     return HttpResponseRedirect(referer)
@@ -586,7 +593,7 @@ def create_manual_task(request):
 # --- 8. TEKİL DÜZENLEME ---
 @login_required
 def edit_task(request, pk):
-    task = get_object_or_404(VisitTask, pk=pk)
+    task = get_object_or_404(filter_by_tenant(VisitTask.objects.all(), request), pk=pk)
     # Edit sayfası GET olduğu için referer'ı form içinde hidden input olarak tutmak gerekir.
     # Basitlik için burada normal redirect kullanıyoruz ama silme/pasif butonları POST olduğu için onlar referer'ı kullanabilir.
     
@@ -636,15 +643,15 @@ def settings_visit_types(request):
             name = request.POST.get('type_name')
             if name: VisitType.objects.create(name=name)
         elif 'delete_type' in request.POST:
-            VisitType.objects.filter(id=request.POST.get('type_id')).delete()
+            filter_by_tenant(VisitType.objects.all(), request).filter(id=request.POST.get('type_id')).delete()
         return redirect('settings_visit_types')
-    return render(request, 'apps/field_operations/settings_types.html', {'types': VisitType.objects.all()})
+    return render(request, 'apps/field_operations/settings_types.html', {'types': filter_by_tenant(VisitType.objects.all(), request)})
 
 # --- 9. ROTA PLANLAMA VE YÖNETİMİ ---
 
 @login_required
 def route_plan_list(request):
-    routes = RoutePlan.objects.all().select_related('customer')
+    routes = filter_by_tenant(RoutePlan.objects.all(), request).select_related('customer')
 
     # Hiyerarşi bazlı yetkilendirme: Admin değilse sadece kendi + altının rotaları
     scope = get_hierarchy_scope_for_user(request.user, include_self=True)
@@ -873,7 +880,7 @@ def visuals_gallery(request):
 
     # Selected summaries (server-side so selections are visible even without JS)
     selected_customers = (
-        list(Customer.objects.filter(id__in=customer_ids).values("id", "name").order_by("name"))
+        list(filter_by_tenant(Customer.objects.all(), request).filter(id__in=customer_ids).values("id", "name").order_by("name"))
         if customer_ids
         else []
     )
@@ -883,7 +890,7 @@ def visuals_gallery(request):
         else []
     )
     selected_surveys = (
-        list(Survey.objects.filter(id__in=survey_ids).values("id", "title").order_by("title"))
+        list(filter_by_tenant(Survey.objects.all(), request).filter(id__in=survey_ids).values("id", "title").order_by("title"))
         if survey_ids
         else []
     )
@@ -926,7 +933,7 @@ def visuals_gallery(request):
     )
 
     qs = (
-        SurveyAnswer.objects.select_related(
+        filter_by_tenant(SurveyAnswer.objects.all(), request).select_related(
             "task",
             "task__customer",
             "task__customer__cari",
@@ -1036,7 +1043,7 @@ def visuals_download(request):
         return HttpResponse("Seçim yok.", content_type="text/plain", status=400)
 
     qs = (
-        SurveyAnswer.objects.select_related(
+        filter_by_tenant(SurveyAnswer.objects.all(), request).select_related(
             "task",
             "task__customer",
             "task__customer__cari",
@@ -1175,7 +1182,7 @@ def _survey_report_columns(survey: Survey):
     return cols, label_by_key
 
 
-def _build_answer_map_for_tasks(tasks: list[VisitTask], survey: Survey) -> dict[tuple[int, int], str]:
+def _build_answer_map_for_tasks(tasks: list[VisitTask], survey: Survey, request) -> dict[tuple[int, int], str]:
     """
     Returns mapping: (task_id, question_id) -> "answer1 | answer2 | ..."
     """
@@ -1184,7 +1191,7 @@ def _build_answer_map_for_tasks(tasks: list[VisitTask], survey: Survey) -> dict[
         return {}
 
     answers = (
-        SurveyAnswer.objects.select_related("question")
+        filter_by_tenant(SurveyAnswer.objects.all(), request).select_related("question")
         .filter(task_id__in=task_ids, question__survey=survey)
         .order_by("task_id", "question_id", "id")
     )
@@ -1298,7 +1305,7 @@ def _set_report_trash_retention_days(days: int) -> int:
     return days
 
 
-def _purge_old_deleted_reports() -> int:
+def _purge_old_deleted_reports(request) -> int:
     """
     Deletes report records from DB if they stayed in trash longer than retention days.
     Returns number of deleted records.
@@ -1310,7 +1317,7 @@ def _purge_old_deleted_reports() -> int:
     else:
         cutoff = timezone.now() - timedelta(days=retention)
 
-    qs = ReportRecord.objects.filter(deleted_at__isnull=False, deleted_at__lte=cutoff)
+    qs = filter_by_tenant(ReportRecord.objects.all(), request).filter(deleted_at__isnull=False, deleted_at__lte=cutoff)
     count = qs.count()
     if count:
         qs.delete()
@@ -1714,15 +1721,15 @@ def daily_visit_summary_save_prefs(request):
 
 @login_required
 def survey_reports_home(request):
-    _purge_old_deleted_reports()
+    _purge_old_deleted_reports(request)
 
     ct = ContentType.objects.get_for_model(Survey)
     reports = (
-        ReportRecord.objects.filter(report_type="survey", content_type=ct, deleted_at__isnull=True)
+        filter_by_tenant(ReportRecord.objects.all(), request).filter(report_type="survey", content_type=ct, deleted_at__isnull=True)
         .order_by("-created_at")
     )
     survey_ids = [r.object_id for r in reports]
-    surveys_by_id = {s.id: s for s in Survey.objects.filter(id__in=survey_ids)}
+    surveys_by_id = {s.id: s for s in filter_by_tenant(Survey.objects.all(), request).filter(id__in=survey_ids)}
 
     rows = []
     for r in reports:
@@ -1737,14 +1744,17 @@ def survey_report_create(request, survey_id: int):
     """
     Creates (or restores) the report entry for a survey and redirects to its report page.
     """
-    survey = get_object_or_404(Survey, pk=survey_id)
+    survey = get_object_or_404(filter_by_tenant(Survey.objects.all(), request), pk=survey_id)
     ct = ContentType.objects.get_for_model(Survey)
-    rec, _ = ReportRecord.objects.get_or_create(
+    rec, created = filter_by_tenant(ReportRecord.objects.all(), request).get_or_create(
         report_type="survey",
         content_type=ct,
         object_id=survey.id,
         defaults={"title": survey.title, "created_by": request.user},
     )
+    if created:
+        set_tenant_on_save(rec, request)
+        rec.save()
     # If it was in trash, restore
     if rec.deleted_at:
         rec.restore_from_trash()
@@ -1758,9 +1768,9 @@ def survey_report_create(request, survey_id: int):
 
 @login_required
 def survey_report(request, survey_id: int):
-    survey = get_object_or_404(Survey, pk=survey_id)
+    survey = get_object_or_404(filter_by_tenant(Survey.objects.all(), request), pk=survey_id)
     ct = ContentType.objects.get_for_model(Survey)
-    rec = ReportRecord.objects.filter(report_type="survey", content_type=ct, object_id=survey.id).first()
+    rec = filter_by_tenant(ReportRecord.objects.all(), request).filter(report_type="survey", content_type=ct, object_id=survey.id).first()
     if rec and rec.deleted_at:
         messages.warning(request, "Bu rapor çöp kutusunda. Geri yüklemek için Çöp Kutusu'ndan geri yükleyin.")
         return redirect("reports_trash")
@@ -1842,7 +1852,7 @@ def survey_report(request, survey_id: int):
     tasks = list(qs[:preview_limit])
     usernames = list({t.merch_code for t in tasks if t.merch_code})
     user_fullname_by_username, hierarchy_parent_by_username = _build_user_and_hierarchy_maps(usernames)
-    answers_map = _build_answer_map_for_tasks(tasks, survey)
+    answers_map = _build_answer_map_for_tasks(tasks, survey, request)
 
     headers = [{"key": k, "label": label_by_key.get(k, k)} for k in selected_cols]
     rows = []
@@ -1883,9 +1893,9 @@ def survey_report(request, survey_id: int):
 
 @login_required
 def survey_report_export(request, survey_id: int):
-    survey = get_object_or_404(Survey, pk=survey_id)
+    survey = get_object_or_404(filter_by_tenant(Survey.objects.all(), request), pk=survey_id)
     ct = ContentType.objects.get_for_model(Survey)
-    rec = ReportRecord.objects.filter(report_type="survey", content_type=ct, object_id=survey.id).first()
+    rec = filter_by_tenant(ReportRecord.objects.all(), request).filter(report_type="survey", content_type=ct, object_id=survey.id).first()
     if rec and rec.deleted_at:
         return HttpResponse("Bu rapor çöp kutusunda.", content_type="text/plain", status=400)
     if not rec:
@@ -1963,7 +1973,7 @@ def survey_report_export(request, survey_id: int):
     # For export, compute answers for all tasks in one go
     task_ids = list(qs.values_list("id", flat=True))
     answers = (
-        SurveyAnswer.objects.select_related("question")
+        filter_by_tenant(SurveyAnswer.objects.all(), request).select_related("question")
         .filter(task_id__in=task_ids, question__survey=survey)
         .order_by("task_id", "question_id", "id")
     )
@@ -2031,14 +2041,14 @@ def survey_submission_edit(request, survey_id: int, task_id: int):
     Edit a single survey submission (answers) identified by VisitTask.id (Cevap ID).
     Allows updating text answers and replacing photo answers.
     """
-    survey = get_object_or_404(Survey, pk=survey_id)
+    survey = get_object_or_404(filter_by_tenant(Survey.objects.all(), request), pk=survey_id)
     task = _get_accessible_survey_task_or_404(request, survey=survey, task_id=task_id)
     questions = list(Question.objects.filter(survey=survey).order_by("order", "id"))
 
     # Build latest answer per question
     latest_answers = {}
     for a in (
-        SurveyAnswer.objects.select_related("question")
+        filter_by_tenant(SurveyAnswer.objects.all(), request).select_related("question")
         .filter(task=task, question__survey=survey)
         .order_by("-id")
     ):
@@ -2057,7 +2067,9 @@ def survey_submission_edit(request, survey_id: int, task_id: int):
                     uploaded = request.FILES.get(field)
                     if uploaded:
                         if not existing:
-                            existing = SurveyAnswer.objects.create(task=task, question=q)
+                            existing = SurveyAnswer(task=task, question=q)
+                            set_tenant_on_save(existing, request)
+                            existing.save()
                             latest_answers[q.id] = existing
                         existing.answer_photo = uploaded
                         existing.answer_text = None
@@ -2067,7 +2079,9 @@ def survey_submission_edit(request, survey_id: int, task_id: int):
                 # Text/select update
                 incoming = (request.POST.get(field) or "").strip()
                 if not existing:
-                    existing = SurveyAnswer.objects.create(task=task, question=q)
+                    existing = SurveyAnswer(task=task, question=q)
+                    set_tenant_on_save(existing, request)
+                    existing.save()
                     latest_answers[q.id] = existing
                 existing.answer_text = incoming
                 # Don't touch photo for non-photo questions
@@ -2116,7 +2130,7 @@ def survey_submission_delete(request, survey_id: int, task_id: int):
     Delete a survey submission from reports by deleting its SurveyAnswer rows
     (does NOT delete the VisitTask itself).
     """
-    survey = get_object_or_404(Survey, pk=survey_id)
+    survey = get_object_or_404(filter_by_tenant(Survey.objects.all(), request), pk=survey_id)
     task = _get_accessible_survey_task_or_404(request, survey=survey, task_id=task_id)
     SurveyAnswer.objects.filter(task=task, question__survey=survey).delete()
     messages.success(request, "Cevap silindi.")
@@ -2133,7 +2147,7 @@ def survey_report_import(request, survey_id: int):
     - If a row has Cevap ID but all other provided columns are empty => delete that submission (answers).
     Shows a summary like: '34 revize edildi, 1 silindi'.
     """
-    survey = get_object_or_404(Survey, pk=survey_id)
+    survey = get_object_or_404(filter_by_tenant(Survey.objects.all(), request), pk=survey_id)
     upload = request.FILES.get("file")
     if not upload:
         messages.error(request, "Dosya seçilmedi.")
@@ -2240,7 +2254,7 @@ def survey_report_import(request, survey_id: int):
                     break
 
             if not any_value:
-                SurveyAnswer.objects.filter(task=task, question__survey=survey).delete()
+                filter_by_tenant(SurveyAnswer.objects.all(), request).filter(task=task, question__survey=survey).delete()
                 deleted += 1
                 continue
 
@@ -2261,7 +2275,9 @@ def survey_report_import(request, survey_id: int):
                 pair = (task.id, q.id)
                 a = latest_answer_by_pair.get(pair)
                 if not a:
-                    a = SurveyAnswer.objects.create(task=task, question=q, answer_text=s)
+                    a = SurveyAnswer(task=task, question=q, answer_text=s)
+                    set_tenant_on_save(a, request)
+                    a.save()
                     latest_answer_by_pair[pair] = a
                 else:
                     a.answer_text = s
@@ -2281,7 +2297,7 @@ def survey_report_import(request, survey_id: int):
 # ----------------------------------------------------------------------------
 @login_required
 def reports_trash(request):
-    purged = _purge_old_deleted_reports()
+    purged = _purge_old_deleted_reports(request)
     retention = _get_report_trash_retention_days()
 
     qs = ReportRecord.objects.filter(deleted_at__isnull=False).order_by("-deleted_at")
@@ -2434,7 +2450,7 @@ def get_route_day_details(request):
             return HttpResponse(json.dumps({'error': 'Eksik parametre'}), content_type='application/json', status=400)
 
         data = []
-        routes = RoutePlan.objects.filter(merch_code=merch).select_related('customer')
+        routes = filter_by_tenant(RoutePlan.objects.all(), request).filter(merch_code=merch).select_related('customer')
 
         for r in routes:
             # Regex ile gün kontrolü (Zırhlı)
@@ -2518,11 +2534,18 @@ def action_route_day(request):
                 if action == 'assign':
                     # Başka bir güne/personele ekle
                     # Hedef personel için rota var mı?
-                    target_route, created = RoutePlan.objects.get_or_create(
+                    tenant = get_current_tenant(request)
+                    target_route, created = filter_by_tenant(RoutePlan.objects.all(), request).get_or_create(
                         customer=route.customer,
                         merch_code=target_merch,
-                        defaults={'active_days': []}
+                        defaults={'active_days': [], 'tenant': tenant} if tenant else {'active_days': []}
                     )
+                    if created and tenant:
+                        target_route.tenant = tenant
+                        target_route.save()
+                    if created:
+                        set_tenant_on_save(target_route, request)
+                        target_route.save()
                     
                     # Hedefin günlerini al
                     target_raw = str(target_route.active_days)
@@ -2641,7 +2664,7 @@ def import_route_plan(request):
                     print(f"-> Personel: {merch_name}")
 
                     # 1. TEMİZLİK (Mevcut günleri temizle - Sadece Excel'dekileri)
-                    routes = RoutePlan.objects.filter(merch_code=merch_name)
+                    routes = filter_by_tenant(RoutePlan.objects.all(), request).filter(merch_code=merch_name)
                     target_days = list(day_columns.values())
                     for r in routes:
                         current = set()
@@ -2663,18 +2686,21 @@ def import_route_plan(request):
                         if raw_sys_id:
                             clean_id = raw_sys_id.replace('G-', '').split('.')[0]
                             if clean_id.isdigit():
-                                customer = Customer.objects.filter(id=int(clean_id)).first()
+                                customer = filter_by_tenant(Customer.objects.all(), request).filter(id=int(clean_id)).first()
                         
                         if not customer and raw_code:
                             clean_code = raw_code.split('.')[0]
-                            customer = Customer.objects.filter(customer_code=clean_code).first()
+                            customer = filter_by_tenant(Customer.objects.all(), request).filter(customer_code=clean_code).first()
 
                         if customer:
-                            route, created = RoutePlan.objects.get_or_create(
+                            route, created = filter_by_tenant(RoutePlan.objects.all(), request).get_or_create(
                                 merch_code=merch_name,
                                 customer=customer,
                                 defaults={'active_days': []}
                             )
+                            if created:
+                                set_tenant_on_save(route, request)
+                                route.save()
                             
                             current_days = set()
                             for d in re.findall(r'\d+', str(route.active_days)): current_days.add(int(d))
@@ -2725,13 +2751,15 @@ def import_route_plan(request):
                                         pass
                                 else:
                                     # B) GÖREV YOK -> OLUŞTUR
-                                    VisitTask.objects.create(
+                                    task = VisitTask(
                                         customer=customer,
                                         merch_code=merch_name,
                                         planned_date=task_date,
                                         cycle_day=d_num,
                                         status='pending'
                                     )
+                                    set_tenant_on_save(task, request)
+                                    task.save()
                                     task_action_count += 1
                                     print(f"      [YENİ] {customer.name} -> {merch_name} ({task_date})")
 
@@ -2777,7 +2805,7 @@ def sync_merch_routes(request):
             RANGE_DAYS = 28 
             
             # Sadece bu personelin rotalarını çek
-            merch_routes = RoutePlan.objects.filter(merch_code=merch_code)
+            merch_routes = filter_by_tenant(RoutePlan.objects.all(), request).filter(merch_code=merch_code)
             count = 0
             
             # Bugünden başla, 28 gün ileri git
@@ -2800,7 +2828,7 @@ def sync_merch_routes(request):
                         
                         # Görev var mı kontrol et (İptal edilenler hariç)
                         # Hem tarih hem de personel kontrolü yap (aynı müşteri + tarih + personel kombinasyonu)
-                        exists = VisitTask.objects.filter(
+                        exists = filter_by_tenant(VisitTask.objects.all(), request).filter(
                             customer=route.customer,
                             planned_date=target_date,
                             merch_code=merch_code
@@ -2808,13 +2836,15 @@ def sync_merch_routes(request):
                         
                         # Yoksa oluştur
                         if not exists:
-                            VisitTask.objects.create(
+                            task = VisitTask(
                                 customer=route.customer,
                                 merch_code=merch_code,
                                 planned_date=target_date,
                                 cycle_day=cycle_day,
                                 status='pending'
                             )
+                            set_tenant_on_save(task, request)
+                            task.save()
                             count += 1
             
             if count > 0:
@@ -2893,14 +2923,17 @@ def add_store_to_route(request):
                     messages.error(request, "Bu kullanıcı için işlem yetkiniz yok.")
                     return HttpResponseRedirect(referer)
                 merch_code = resolved
-                customer = Customer.objects.get(id=customer_id)
+                customer = get_object_or_404(filter_by_tenant(Customer.objects.all(), request), id=customer_id)
                 
                 # Bu personel ve müşteri için zaten kayıt var mı?
-                route, created = RoutePlan.objects.get_or_create(
+                route, created = filter_by_tenant(RoutePlan.objects.all(), request).get_or_create(
                     merch_code=merch_code,
                     customer=customer,
                     defaults={'active_days': []}
                 )
+                if created:
+                    set_tenant_on_save(route, request)
+                    route.save()
                 
                 # Günleri güncelle
                 current_days = set()
@@ -2995,7 +3028,7 @@ def route_replace_store_api(request):
         try:
             with transaction.atomic():
                 # A. ESKİ ROTA İŞLEMLERİ
-                old_route = RoutePlan.objects.get(id=route_id)
+                old_route = get_object_or_404(filter_by_tenant(RoutePlan.objects.all(), request), id=route_id)
                 merch = old_route.merch_code
                 
                 # Günlerden çıkar
@@ -3007,7 +3040,7 @@ def route_replace_store_api(request):
                     old_route.save()
                     
                     # Eski görevleri sil
-                    VisitTask.objects.filter(
+                    filter_by_tenant(VisitTask.objects.all(), request).filter(
                         customer=old_route.customer,
                         merch_code=merch,
                         cycle_day=day,
@@ -3018,11 +3051,14 @@ def route_replace_store_api(request):
                 new_customer = Customer.objects.get(id=new_customer_id)
                 
                 # Yeni müşteri için bu personelde rota var mı? Yoksa oluştur.
-                new_route, created = RoutePlan.objects.get_or_create(
+                new_route, created = filter_by_tenant(RoutePlan.objects.all(), request).get_or_create(
                     merch_code=merch,
                     customer=new_customer,
                     defaults={'active_days': []}
                 )
+                if created:
+                    set_tenant_on_save(new_route, request)
+                    new_route.save()
                 
                 # Güne ekle
                 new_days = set()
@@ -3042,13 +3078,16 @@ def route_replace_store_api(request):
                     
                     if current_cycle == day:
                         # Görev oluştur
-                        VisitTask.objects.get_or_create(
+                        task, created = filter_by_tenant(VisitTask.objects.all(), request).get_or_create(
                             customer=new_customer,
                             merch_code=merch,
                             planned_date=target_date,
                             cycle_day=day,
                             defaults={'status': 'pending'}
                         )
+                        if created:
+                            set_tenant_on_save(task, request)
+                            task.save()
 
             return HttpResponse(json.dumps({'status': 'success'}), content_type='application/json')
             

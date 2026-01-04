@@ -140,7 +140,7 @@
                             <td><input type="checkbox" name="selected_ids" value="{{ c.id }}" class="row-checkbox" onchange="updateBulkToolbar()"></td>
                             
                             <td class="col-sys_id">
-                            <span class="badge bg-secondary">M-{{ c.id }}</span>
+                            <span class="badge bg-secondary">{{ c.get_sys_id_display }}</span>
                             </td>
                             <td class="col-code fw-bold">{{ c.customer_code }}</td>
                             <td class="col-name"><a href="{% url 'edit_customer' c.pk %}" class="text-decoration-none fw-bold text-dark">{{ c.name }}</a></td>

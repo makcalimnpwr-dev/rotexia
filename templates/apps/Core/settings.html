@@ -3,6 +3,15 @@
 {% block content %}
 <div class="container-fluid">
     
+    {# DEBUG: Tenant bilgisi #}
+    {% if not is_admin_panel %}
+    <div class="alert alert-info">
+        <strong>DEBUG:</strong> 
+        Tenant: {{ tenant.name|default:"YOK" }} (ID: {{ tenant.id|default:"YOK" }})
+        | Session tenant_id: {{ request.session.tenant_id|default:"YOK" }}
+    </div>
+    {% endif %}
+    
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h3 class="fw-bold text-dark">Sistem Yapılandırması</h3>
         <div>

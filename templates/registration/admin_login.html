@@ -1,0 +1,138 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geliştirici Admin | Rotexia</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #151521;
+            font-family: 'Inter', sans-serif;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+        }
+        .login-card {
+            width: 100%;
+            max-width: 400px;
+            padding: 40px 30px;
+            position: relative;
+            z-index: 1;
+            background: transparent;
+        }
+        .brand-area {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .logo-text {
+            font-size: 32px;
+            font-weight: 700;
+            color: #ffffff;
+            letter-spacing: -1px;
+        }
+        .custom-input {
+            background-color: #1e1e2d;
+            border: 1px solid #2d2d3f;
+            color: white;
+            height: 55px;
+            border-radius: 12px;
+            padding-left: 45px;
+            font-size: 15px;
+        }
+        .custom-input:focus {
+            background-color: #252536;
+            border-color: #0d6efd;
+            color: white;
+            box-shadow: 0 0 0 4px rgba(13, 110, 253, 0.15);
+        }
+        .input-icon {
+            position: absolute;
+            left: 15px;
+            top: 18px;
+            color: #6c757d;
+            font-size: 18px;
+        }
+        .btn-login {
+            width: 100%;
+            height: 55px;
+            background: #0d6efd;
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-weight: 700;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        .footer-text {
+            text-align: center;
+            margin-top: 30px;
+            color: #6c757d;
+            font-size: 12px;
+        }
+        .admin-badge {
+            background: linear-gradient(135deg, #dc3545, #c82333);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            display: inline-block;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="brand-area">
+            <div class="admin-badge">
+                <i class="fas fa-shield-alt me-1"></i> Geliştirici Admin Paneli
+            </div>
+            <div class="logo-text">Rotexia</div>
+        </div>
+
+        <form method="post">
+            {% csrf_token %}
+            
+            {% if form.errors %}
+                <div class="alert alert-danger py-2 small rounded-3 border-0 bg-danger bg-opacity-10 text-danger mb-4">
+                    <i class="fas fa-exclamation-circle me-1"></i> Kullanıcı adı veya şifre hatalı.
+                </div>
+            {% endif %}
+
+            <div class="form-group position-relative mb-3">
+                <i class="fas fa-user input-icon"></i>
+                <input type="text" name="username" class="form-control custom-input" placeholder="Kullanıcı Adı" required autofocus autocomplete="off" value="">
+            </div>
+
+            <div class="form-group position-relative mb-3">
+                <i class="fas fa-lock input-icon"></i>
+                <input type="password" name="password" class="form-control custom-input" placeholder="Şifre" required autocomplete="new-password" value="">
+            </div>
+
+            <button type="submit" class="btn btn-login">
+                Giriş Yap <i class="fas fa-arrow-right ms-2"></i>
+            </button>
+            
+            <div class="text-center mt-3">
+                <a href="{% url 'login' %}" class="text-muted" style="text-decoration: none; font-size: 13px;">
+                    <i class="fas fa-arrow-left me-1"></i> Normal Giriş
+                </a>
+            </div>
+        </form>
+
+        <div class="footer-text">
+            &copy; 2025 Rotexia v1.2<br>
+            Geliştirici Admin Paneli
+        </div>
+    </div>
+</body>
+</html>
+
+
+

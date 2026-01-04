@@ -3,7 +3,16 @@ from . import views
 from apps.core import views as core_views
 
 urlpatterns = [
-    path('', views.home, name='home'),
+    path('', views.index, name='index'),  # Ana sayfa - firma adı girme
+    path('connect/', views.company_connect, name='company_connect'),  # Firma bağlanma
+    path('login/<str:tenant_slug>/', views.login_with_tenant, name='login_with_tenant'),  # Firma login sayfası
+    path('home/', views.home, name='home'),  # Dashboard (giriş yapıldıktan sonra)
+    path('admin-home/', views.admin_home, name='admin_home'),
+    path('admin-login/', views.AdminLoginView.as_view(), name='admin_login'),
+    path('admin/update-settings/', views.admin_update_settings, name='admin_update_settings'),
+    path('company/create/', views.create_company, name='create_company'),
+    path('company/select/<int:tenant_id>/', views.select_company, name='select_company'),
+    path('company/edit/<int:tenant_id>/', views.edit_tenant, name='edit_tenant'),
     # ... mevcut urller ...
     path('app/', views.mobile_home, name='mobile_home'), # Mobilin anasayfası
     path('app/team/', views.mobile_team_home, name='mobile_team_home'),
@@ -16,7 +25,9 @@ urlpatterns = [
     # ... diğer mobil url'ler ...
     path('app/task/<int:task_id>/fill/<int:survey_id>/', views.mobile_fill_survey, name='mobile_fill_survey'),
     path('app/task/<int:task_id>/survey/<int:survey_id>/', views.mobile_view_survey, name='mobile_view_survey'),
-    path('system-settings/', core_views.settings_home, name='settings_home'),
+    path('system-settings/', core_views.settings_home, name='settings_home'),  # Router - admin veya tenant'a yönlendirir
+    path('admin-panel/settings/', core_views.admin_settings, name='admin_settings'),  # Admin paneli ayarları (Django admin ile çakışmaması için)
+    path('tenant/settings/', core_views.tenant_settings, name='tenant_settings'),  # Firma paneli ayarları
     path('api/start-visit/<int:task_id>/', views.start_visit_check, name='api_start_visit'),
     path('api/check-required-surveys/<int:task_id>/', views.check_required_surveys, name='api_check_required_surveys'),
     path('api/finish-visit/<int:task_id>/', views.finish_visit, name='api_finish_visit'),

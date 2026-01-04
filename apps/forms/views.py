@@ -10,11 +10,12 @@ from apps.users.models import UserRole, CustomUser, UserFieldDefinition
 # --- HATAYI ÇÖZEN SATIR ---
 from apps.customers.models import Customer, CustomerCari, CustomerFieldDefinition, CustomFieldDefinition
 # --------------------------
+from apps.core.tenant_utils import filter_by_tenant, set_tenant_on_save
 
 # 1. ANKET LİSTESİ
 @login_required
 def survey_list(request):
-    surveys = Survey.objects.all().order_by('-created_at')
+    surveys = filter_by_tenant(Survey.objects.all(), request).order_by('-created_at')
     return render(request, 'forms/list.html', {'surveys': surveys})
 
 # 2. YENİ ANKET OLUŞTURMA
@@ -24,7 +25,9 @@ def survey_create(request):
         title = request.POST.get('title')
         desc = request.POST.get('description')
         if title:
-            survey = Survey.objects.create(title=title, description=desc)
+            survey = Survey(title=title, description=desc)
+            set_tenant_on_save(survey, request)
+            survey.save()
             messages.success(request, 'Anket oluşturuldu, şimdi soruları ekleyin.')
             return redirect('survey_builder', pk=survey.id)
     return render(request, 'forms/create.html')
@@ -32,7 +35,7 @@ def survey_create(request):
 # 3. ANKET SİLME
 @login_required
 def survey_delete(request, pk):
-    survey = get_object_or_404(Survey, pk=pk)
+    survey = get_object_or_404(filter_by_tenant(Survey.objects.all(), request), pk=pk)
     survey.delete()
     messages.success(request, 'Anket silindi.')
     return redirect('survey_list')
@@ -40,7 +43,7 @@ def survey_delete(request, pk):
 # 4. SORU EKLEME
 @login_required
 def question_create(request, survey_id):
-    survey = get_object_or_404(Survey, pk=survey_id)
+    survey = get_object_or_404(filter_by_tenant(Survey.objects.all(), request), pk=survey_id)
     if request.method == 'POST':
         label = request.POST.get('label')
         input_type = request.POST.get('input_type')
@@ -83,7 +86,16 @@ def question_create(request, survey_id):
 @login_required
 def question_delete(request, question_id):
     question = get_object_or_404(Question, pk=question_id)
-    survey_id = question.survey.id
+    # Tenant kontrolü: Sadece mevcut tenant'ın sorusunu silebilir
+    survey = question.survey
+    if hasattr(survey, 'tenant'):
+        from apps.core.tenant_utils import get_current_tenant, require_tenant_for_action
+        tenant = get_current_tenant(request)
+        if tenant and survey.tenant != tenant:
+            from django.contrib import messages
+            messages.error(request, 'Bu işlem için yetkiniz yok.')
+            return redirect('survey_list')
+    survey_id = survey.id
     question.delete()
     messages.success(request, 'Soru silindi.')
     return redirect('survey_builder', pk=survey_id)
@@ -136,7 +148,7 @@ def get_question_options(request, question_id):
 # 8. ANKET TASARIMCISI (BUILDER) - HATA VEREN FONKSİYON BUYDU
 @login_required
 def survey_builder(request, pk):
-    survey = get_object_or_404(Survey, pk=pk)
+    survey = get_object_or_404(filter_by_tenant(Survey.objects.all(), request), pk=pk)
     questions = survey.questions.all().order_by('order')
     
     # --- VERİLERİ ÇEK ---

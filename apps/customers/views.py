@@ -9,6 +9,7 @@ from .forms import CustomerForm, CariForm, CustomFieldForm
 from apps.users.hierarchy_access import get_hierarchy_scope_for_user
 from django.db.models import Q as DQ
 from apps.core.excel_utils import xlsx_from_rows, xlsx_to_rows
+from apps.core.tenant_utils import filter_by_tenant, set_tenant_on_save, get_current_tenant
 
 # --- LİSTE VE SAYFALAMA ---
 @login_required
@@ -22,7 +23,7 @@ def customer_list(request):
     if direction == 'desc' and not db_sort_field.startswith('-'): db_sort_field = f'-{db_sort_field}'
     
     # 2. TEMEL SORGULAR
-    customer_qs = Customer.objects.all().order_by(db_sort_field)
+    customer_qs = filter_by_tenant(Customer.objects.all(), request).order_by(db_sort_field)
 
     # Hiyerarşi bazlı filtre: Admin değilse sadece kendi/altının müşteri havuzu
     scope = get_hierarchy_scope_for_user(request.user, include_self=True)
@@ -118,15 +119,15 @@ def bulk_customer_action(request):
         if not selected_ids: return redirect('customer_list')
 
         if action_type == 'delete':
-            Customer.objects.filter(id__in=selected_ids).delete()
+            filter_by_tenant(Customer.objects.all(), request).filter(id__in=selected_ids).delete()
             messages.success(request, "Silindi.")
         elif action_type == 'bulk_edit':
             target_field = request.POST.get('target_field')
             new_value = request.POST.get('new_value')
             if target_field == 'cari':
-                if new_value: Customer.objects.filter(id__in=selected_ids).update(cari_id=new_value)
+                if new_value: filter_by_tenant(Customer.objects.all(), request).filter(id__in=selected_ids).update(cari_id=new_value)
             else:
-                Customer.objects.filter(id__in=selected_ids).update(**{target_field: new_value})
+                filter_by_tenant(Customer.objects.all(), request).filter(id__in=selected_ids).update(**{target_field: new_value})
             messages.success(request, "Güncellendi.")
     return redirect('customer_list')
 
@@ -135,7 +136,9 @@ def add_customer(request):
     if request.method == 'POST':
         form = CustomerForm(request.POST)
         if form.is_valid():
-            form.save()
+            customer = form.save(commit=False)
+            set_tenant_on_save(customer, request)
+            customer.save()
             messages.success(request, "Müşteri eklendi.")
             return redirect('customer_list')
     else: form = CustomerForm()
@@ -143,7 +146,7 @@ def add_customer(request):
 
 @login_required
 def edit_customer(request, pk):
-    customer = get_object_or_404(Customer, pk=pk)
+    customer = get_object_or_404(filter_by_tenant(Customer.objects.all(), request), pk=pk)
     if request.method == 'POST':
         form = CustomerForm(request.POST, instance=customer)
         if form.is_valid():
@@ -155,7 +158,22 @@ def edit_customer(request, pk):
 
 @login_required
 def delete_customer(request, pk):
-    get_object_or_404(Customer, pk=pk).delete()
+    # Tenant kontrolü - MUTLAKA yapılmalı
+    tenant = get_current_tenant(request)
+    if not tenant:
+        messages.error(request, "Firma seçimi yapılmamış. Lütfen bir firma seçin.")
+        return redirect('customer_list')
+    
+    # Sadece mevcut tenant'ın müşterilerini göster
+    customer = get_object_or_404(filter_by_tenant(Customer.objects.all(), request), pk=pk)
+    
+    # Ekstra güvenlik: Tenant kontrolü
+    if hasattr(customer, 'tenant') and customer.tenant != tenant:
+        messages.error(request, "Bu müşteriyi silme yetkiniz yok. Farklı bir firmaya ait.")
+        return redirect('customer_list')
+    
+    customer.delete()
+    messages.success(request, "Müşteri silindi.")
     return redirect('customer_list')
 
 @login_required
@@ -180,7 +198,7 @@ def delete_cari(request, pk):
 
 @login_required
 def export_customers(request):
-    customers = Customer.objects.all()
+    customers = filter_by_tenant(Customer.objects.all(), request)
     selected_fields = request.GET.get('fields', '')
     
     # TAM SÜTUN HARİTASI (Checkbox Value -> Excel Başlığı)
@@ -212,7 +230,7 @@ def export_customers(request):
     for c in customers:
         row = {}
         # Standart Alanlar
-        if 'sys_id' in requested_keys: row[field_map['sys_id']] = f"M-{c.id}"
+        if 'sys_id' in requested_keys: row[field_map['sys_id']] = c.get_sys_id_display()
         if 'code' in requested_keys: row[field_map['code']] = c.customer_code
         if 'name' in requested_keys: row[field_map['name']] = c.name
         if 'cari' in requested_keys: row[field_map['cari']] = c.cari.name if c.cari else ''
@@ -312,8 +330,8 @@ def import_customers(request):
 
                 # --- C. KAYIT / GÜNCELLEME ---
                 if sys_id:
-                    # GÜNCELLEME
-                    customer = Customer.objects.filter(id=sys_id).first()
+                    # GÜNCELLEME: sys_id'ye göre bul (tenant-specific)
+                    customer = filter_by_tenant(Customer.objects.all(), request).filter(sys_id=sys_id).first()
                     if customer:
                         for k, v in update_data.items():
                             setattr(customer, k, v)
@@ -333,6 +351,7 @@ def import_customers(request):
                         
                         customer = Customer(**update_data)
                         customer.extra_data = extra_data_update
+                        set_tenant_on_save(customer, request)
                         customer.save()
                         created_count += 1
 
@@ -358,7 +377,7 @@ def customer_map_view(request):
     if selected_ids:
         id_list = selected_ids.split(',')
         # Sadece koordinatı olanları seç
-        customers = Customer.objects.filter(id__in=id_list).exclude(latitude__isnull=True).exclude(longitude__isnull=True)
+        customers = filter_by_tenant(Customer.objects.all(), request).filter(id__in=id_list).exclude(latitude__isnull=True).exclude(longitude__isnull=True)
         
         for c in customers:
             locations.append({

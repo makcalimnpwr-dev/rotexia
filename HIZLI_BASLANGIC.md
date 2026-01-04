@@ -1,86 +1,64 @@
-# ⚡ Rotexia - Hızlı Başlangıç (Canlıya Alma)
+# Subdomain Kurulumu - Hızlı Başlangıç
 
-## 🎯 3 Adımda Canlıya Alın!
+## ✅ Kod Hazır!
 
-### 1️⃣ GitHub'a Yükleyin
+Subdomain multi-tenancy sistemi kuruldu ve çalışır durumda.
 
-```bash
-# Proje klasöründe:
-git init
-git add .
-git commit -m "Rotexia - İlk deployment"
-git branch -M main
-git remote add origin https://github.com/KULLANICI_ADI/rotexia.git
-git push -u origin main
+## 🚀 Hemen Test Etmek İçin (Development)
+
+### Windows Kullanıcıları:
+
+1. **Hosts dosyasını düzenle:**
+   - `Win + R` tuşlarına basın
+   - `notepad C:\Windows\System32\drivers\etc\hosts` yazın
+   - Enter'a basın
+   - UAC (Kullanıcı Hesabı Denetimi) penceresi açılırsa "Evet" deyin
+   - Dosyanın en altına şu satırları ekleyin:
+
+```
+127.0.0.1    admin.localhost
+127.0.0.1    deneme.localhost
+127.0.0.1    pastel.localhost
 ```
 
-### 2️⃣ Render.com'da Deploy Edin (Önerilen)
+   - Dosyayı kaydedin (Ctrl+S)
 
-1. [render.com](https://render.com) → GitHub ile giriş
-2. **PostgreSQL oluştur:** "New +" → "PostgreSQL" → Free plan
-3. **Web Service oluştur:** "New +" → "Web Service" → GitHub repo seç
-4. **Ayarlar:**
-   - Build Command: `pip install -r requirements.txt && python manage.py collectstatic --noinput`
-   - Start Command: `gunicorn config.wsgi:application`
-5. **Environment Variables ekle:**
+2. **Django sunucusunu başlatın:**
+   ```bash
+   python manage.py runserver
    ```
-   SECRET_KEY=buraya-güvenli-key (Python'da oluşturun)
-   DEBUG=False
-   ALLOWED_HOSTS=your-app.onrender.com
-   DATABASE_URL=postgresql://... (PostgreSQL'den kopyala)
+
+3. **Tarayıcıda test edin:**
    ```
-6. **Deploy!** 🚀
+   http://admin.localhost:8000 → Admin paneli
+   http://deneme.localhost:8000 → Deneme firması
+   http://pastel.localhost:8000 → Pastel firması
+   ```
 
-### 3️⃣ İlk Kurulum
+## 📝 Production'a Geçiş
 
-Deploy tamamlandıktan sonra Shell'de:
+1. **DNS kayıtlarını ekleyin:**
+   ```
+   *.fieldops.com → A kaydı → [SUNUCU_IP]
+   ```
 
-```bash
-python manage.py migrate
-python manage.py createsuperuser
-```
+2. **Environment variable ekleyin:**
+   ```bash
+   SUBDOMAIN_DOMAIN=fieldops.com
+   ```
 
-**Tamamlandı!** ✅ Site canlıda: `https://your-app.onrender.com`
+3. **Test edin:**
+   ```
+   https://admin.fieldops.com
+   https://deneme.fieldops.com
+   https://pastel.fieldops.com
+   ```
 
----
+## 🎯 Önemli Noktalar
 
-## 🔄 Güncelleme Nasıl Yapılır?
+- ✅ Kod **TEK** kalır - güncelleme **TEK SEFERDE** yapılır
+- ✅ Her firma kendi subdomain'inde tamamen izole
+- ✅ Session'lar karışmaz (her subdomain kendi session'ını kullanır)
+- ✅ Mevcut sistemle uyumlu (localhost:8000 hala çalışır)
 
-**Çok basit!** Kod değiştir → GitHub'a push et → Otomatik deploy olur!
-
-```bash
-git add .
-git commit -m "Yeni özellik"
-git push origin main
-```
-
-2-5 dakika içinde site güncellenir! 🎉
-
----
-
-## 📚 Detaylı Rehberler
-
-- **Tam Deployment Rehberi:** `DEPLOYMENT_REHBERI.md`
-- **Güncelleme Rehberi:** `GUNCELLEME_REHBERI.md`
-
----
-
-## 🆘 Hızlı Yardım
-
-**Site çalışmıyor?**
-- Logs kontrol edin (Render Dashboard → Logs)
-- Environment variables doğru mu?
-- Migration çalıştırdınız mı?
-
-**Static files görünmüyor?**
-```bash
-# Shell'de:
-python manage.py collectstatic --noinput
-```
-
----
-
-**Başarılar!** 🚀
-
-
-
+Detaylı bilgi için: `SUBDOMAIN_KURULUM.md` dosyasına bakın.

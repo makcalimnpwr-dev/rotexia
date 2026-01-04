@@ -22,8 +22,9 @@ urlpatterns = [
         content_type='application/javascript'
     ), name='pwa_sw'),
     
-    # 2. Giriş / Çıkış İşlemleri (Otomatik Giriş KALDIRILDI)
-    # Artık standart giriş sistemini kullanıyoruz
+    # 2. Giriş / Çıkış İşlemleri
+    path('accounts/login/', core_views.CustomLoginView.as_view(), name='login'),  # Legacy support
+    path('accounts/logout/', core_views.logout_view, name='logout'),
     path('accounts/', include('django.contrib.auth.urls')),
     
     # 3. Modüllerin Adresleri

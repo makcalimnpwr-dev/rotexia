@@ -1,0 +1,172 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="m-0">Firma Yönetimi</h2>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addCompanyModal">
+        <i class="fas fa-plus me-2"></i> Firma Ekle
+    </button>
+</div>
+
+<div class="row">
+    {% for tenant in tenants %}
+    <div class="col-md-4 mb-4">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start mb-3">
+                    <div>
+                        <h5 class="fw-bold mb-1">{{ tenant.name }}</h5>
+                        <small class="text-muted">{{ tenant.email }}</small>
+                    </div>
+                    <div class="badge bg-{{ tenant.is_active|yesno:'success,danger' }}">
+                        {{ tenant.is_active|yesno:'Aktif,Pasif' }}
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <div class="d-flex align-items-center mb-2">
+                        <div class="color-preview me-2" style="width: 30px; height: 30px; background-color: {{ tenant.primary_color }}; border-radius: 6px; border: 2px solid #e0e0e0;"></div>
+                        <small class="text-muted">Tema Rengi: {{ tenant.primary_color }}</small>
+                    </div>
+                </div>
+                
+                <div class="d-flex justify-content-between text-muted small mb-3">
+                    <span><i class="fas fa-calendar me-1"></i> {{ tenant.created_at|date:"d.m.Y" }}</span>
+                    <span><i class="fas fa-link me-1"></i> {{ tenant.slug }}.fieldops.com</span>
+                </div>
+                
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <small class="text-muted">
+                        <i class="fas fa-globe me-1"></i>
+                        <code>{{ tenant.slug }}.fieldops.com</code>
+                    </small>
+                </div>
+                <div class="d-flex justify-content-end gap-2">
+                    <a href="{% url 'edit_tenant' tenant.id %}" class="btn btn-sm btn-secondary">
+                        <i class="fas fa-edit me-1"></i> Düzenle
+                    </a>
+                    <a href="{% url 'select_company' tenant.id %}" class="btn btn-sm btn-primary">
+                        <i class="fas fa-external-link-alt me-1"></i> Firma Paneline Git
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% empty %}
+    <div class="col-12">
+        <div class="alert alert-info text-center">
+            <i class="fas fa-info-circle me-2"></i> Henüz firma eklenmemiş. İlk firmanızı eklemek için yukarıdaki "Firma Ekle" butonuna tıklayın.
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Firma Ekleme Modal -->
+<div class="modal fade" id="addCompanyModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Yeni Firma Ekle</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" action="{% url 'create_company' %}">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Firma Adı <span class="text-danger">*</span></label>
+                        <input type="text" name="name" id="companyName" class="form-control" required placeholder="Örn: Pastel" oninput="updateSlugPreview()">
+                        <small class="text-muted">Firma adı otomatik olarak subdomain'e dönüştürülecektir.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">
+                            Subdomain (Slug) 
+                            <span class="text-muted small">(Opsiyonel - Otomatik oluşturulur)</span>
+                        </label>
+                        <div class="input-group">
+                            <input type="text" name="slug" id="companySlug" class="form-control" placeholder="Otomatik oluşturulacak" oninput="updateSlugPreview()">
+                            <span class="input-group-text bg-light">.fieldops.com</span>
+                        </div>
+                        <small class="text-muted">
+                            <i class="fas fa-info-circle"></i> 
+                            Subdomain: <strong id="slugPreview">firma-adi</strong>.fieldops.com
+                        </small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">E-posta</label>
+                        <input type="email" name="email" class="form-control" placeholder="info@firma.com">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Tema Rengi</label>
+                        <div class="input-group">
+                            <input type="color" name="primary_color" class="form-control form-control-color" value="#0d6efd" title="Renk Seç">
+                            <input type="text" class="form-control" value="#0d6efd" id="colorText" readonly>
+                        </div>
+                    </div>
+                    <div class="alert alert-info small mb-0">
+                        <i class="fas fa-lightbulb me-2"></i>
+                        <strong>Not:</strong> Yeni firma eklendiğinde, <code>subdomain.fieldops.com</code> adresinden erişilebilir olacaktır.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                    <button type="submit" class="btn btn-primary">Firma Ekle</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+// Renk seçici
+document.querySelector('input[type="color"]').addEventListener('input', function(e) {
+    document.getElementById('colorText').value = e.target.value;
+});
+
+// Slug önizleme (Türkçe karakterleri çevir)
+function slugify(text) {
+    const trMap = {
+        'çÇ': 'c',
+        'ğĞ': 'g',
+        'şŞ': 's',
+        'üÜ': 'u',
+        'ıİ': 'i',
+        'öÖ': 'o'
+    };
+    for (const key in trMap) {
+        text = text.replace(new RegExp('[' + key + ']', 'g'), trMap[key]);
+    }
+    return text
+        .toString()
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, '-')        // Boşlukları tire ile değiştir
+        .replace(/[^\w\-]+/g, '')    // Özel karakterleri kaldır
+        .replace(/\-\-+/g, '-')      // Çift tireleri tek yap
+        .replace(/^-+/, '')          // Başlangıçtaki tireleri kaldır
+        .replace(/-+$/, '');         // Sondaki tireleri kaldır
+}
+
+function updateSlugPreview() {
+    const nameInput = document.getElementById('companyName');
+    const slugInput = document.getElementById('companySlug');
+    const preview = document.getElementById('slugPreview');
+    
+    if (slugInput.value.trim()) {
+        // Manuel girilmiş slug varsa onu kullan
+        preview.textContent = slugify(slugInput.value) || 'firma-adi';
+    } else if (nameInput.value.trim()) {
+        // Firma adından otomatik oluştur
+        preview.textContent = slugify(nameInput.value) || 'firma-adi';
+    } else {
+        preview.textContent = 'firma-adi';
+    }
+}
+
+// Sayfa yüklendiğinde
+document.addEventListener('DOMContentLoaded', function() {
+    updateSlugPreview();
+});
+</script>
+{% endblock %}
+
+

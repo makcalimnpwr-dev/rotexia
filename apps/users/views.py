@@ -12,6 +12,7 @@ from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 import json
 from apps.core.excel_utils import xlsx_from_rows, xlsx_to_rows
+from apps.core.tenant_utils import get_current_tenant, filter_by_tenant, set_tenant_on_save, require_tenant_for_action
 
 # --- AYARLAR ANA SAYFASI ---
 @login_required
@@ -21,26 +22,49 @@ def settings_home(request):
 
 # --- ROL YÖNETİMİ ---
 @login_required
-@root_admin_required
 def role_list(request):
-    roles = UserRole.objects.all()
+    """
+    Rol listesi - Admin paneli veya firma paneli
+    Admin panelinde: tenant=None olan global roller
+    Firma panelinde: Sadece seçili firmanın rolleri
+    """
+    # Root admin ve tenant session yoksa admin paneli
+    is_admin_mode = is_root_admin(request.user) and 'tenant_id' not in request.session
+    
+    if is_admin_mode:
+        # Admin paneli: Global roller (tenant=None)
+        roles = UserRole.objects.filter(tenant__isnull=True).order_by('name')
+    else:
+        # Firma paneli: Tenant-specific roller
+        roles = filter_by_tenant(UserRole.objects.all(), request).order_by('name')
     
     # Yeni Rol Ekleme İşlemi
     if request.method == 'POST':
         form = RoleForm(request.POST)
         if form.is_valid():
-            form.save()
+            role = form.save(commit=False)
+            if is_admin_mode:
+                # Admin panelinde tenant=None ile oluştur
+                role.tenant = None
+            else:
+                # Firma panelinde tenant ata
+                set_tenant_on_save(role, request)
+            role.save()
             messages.success(request, "Yeni rol eklendi.")
             return redirect('role_list')
     else:
         form = RoleForm()
         
-    return render(request, 'apps/users/role_list.html', {'roles': roles, 'form': form})
+    return render(request, 'apps/users/role_list.html', {
+        'roles': roles, 
+        'form': form,
+        'is_admin_mode': is_admin_mode
+    })
 
 @login_required
 @root_admin_required
 def role_delete(request, pk):
-    role = get_object_or_404(UserRole, pk=pk)
+    role = get_object_or_404(filter_by_tenant(UserRole.objects.all(), request), pk=pk)
     role.delete()
     messages.success(request, "Rol silindi.")
     return redirect('role_list')
@@ -51,12 +75,11 @@ def role_delete(request, pk):
 # apps/users/views.py dosyasında user_list fonksiyonu:
 
 @login_required
-@root_admin_required
 def user_list(request):
-    users = CustomUser.objects.all().order_by('-date_joined')
+    users = filter_by_tenant(CustomUser.objects.all(), request).order_by('-date_joined')
     
     # BU SATIR SAYESİNDE FİLTRE KUTUSU HER ZAMAN GÜNCEL OLUR
-    roles = UserRole.objects.all() 
+    roles = filter_by_tenant(UserRole.objects.all(), request) 
 
     # ... filtreleme kodları (search, role_filter vb.) ...
     search_query = request.GET.get('search', '')
@@ -88,20 +111,82 @@ def user_list(request):
 @login_required
 @root_admin_required
 def add_user(request):
+    from apps.core.tenant_utils import get_current_tenant, filter_by_tenant
+    from apps.core.models import Tenant
+    
+    # Önce request.tenant'ı kontrol et (middleware'den)
+    tenant = getattr(request, 'tenant', None)
+    
+    # Eğer request.tenant yoksa, session'dan al
+    if not tenant and 'tenant_id' in request.session:
+        try:
+            tenant = Tenant.objects.get(id=request.session['tenant_id'], is_active=True)
+        except Tenant.DoesNotExist:
+            del request.session['tenant_id']
+            tenant = None
+    
+    # Hala tenant yoksa, get_current_tenant'ı kullan (fallback)
+    if not tenant:
+        tenant = get_current_tenant(request)
+    
+    # Tenant'a göre rolleri çek (her zaman fresh)
+    if tenant:
+        available_roles = UserRole.objects.filter(tenant=tenant).order_by('name')
+    else:
+        available_roles = UserRole.objects.none()
+    
     if request.method == 'POST':
-        form = UserCreationForm(request.POST)
+        form = UserCreationForm(request.POST, request=request)
         if form.is_valid():
-            form.save()
+            user = form.save(commit=True)
             messages.success(request, "Kullanıcı oluşturuldu.")
             return redirect('user_list')
     else:
-        form = UserCreationForm()
-    return render(request, 'apps/users/add_user.html', {'form': form})
+        form = UserCreationForm(request=request)
+    
+    # Tenant'a göre rolleri çek (her zaman fresh) - daha önce tanımlanmış
+    if not tenant:
+        available_roles = UserRole.objects.none()
+    
+    # Form'un queryset'ini zorla güncelle
+    if tenant:
+        form.fields['role'].queryset = available_roles
+    
+    return render(request, 'apps/users/add_user.html', {
+        'form': form,
+        'available_roles': available_roles  # Template'e de gönder
+    })
 
 @login_required
 @root_admin_required
 def edit_user(request, pk):
-    user = get_object_or_404(CustomUser, pk=pk)
+    # Tenant kontrolü
+    from apps.core.tenant_utils import get_current_tenant
+    from apps.core.models import Tenant
+    
+    # Önce request.tenant'ı kontrol et (middleware'den)
+    tenant = getattr(request, 'tenant', None)
+    
+    # Eğer request.tenant yoksa, session'dan al
+    if not tenant and 'tenant_id' in request.session:
+        try:
+            tenant = Tenant.objects.get(id=request.session['tenant_id'], is_active=True)
+        except Tenant.DoesNotExist:
+            del request.session['tenant_id']
+            tenant = None
+    
+    # Hala tenant yoksa, get_current_tenant'ı kullan (fallback)
+    if not tenant:
+        tenant = get_current_tenant(request)
+    
+    if not is_root_admin(request.user):
+        user = get_object_or_404(filter_by_tenant(CustomUser.objects.all(), request), pk=pk)
+        # Ekstra güvenlik: Tenant kontrolü
+        if hasattr(user, 'tenant') and user.tenant != tenant:
+            messages.error(request, "Bu kullanıcıyı düzenleme yetkiniz yok.")
+            return redirect('user_list')
+    else:
+        user = get_object_or_404(CustomUser.objects.all(), pk=pk)
 
     # Root admin düzenlenemez (hiyerarşi tutarlılığı için)
     if is_root_admin(user):
@@ -111,10 +196,25 @@ def edit_user(request, pk):
     # Özel alan tanımlarını çek
     user_field_defs = UserFieldDefinition.objects.all()
     
+    # Tenant'a göre rolleri çek (her zaman fresh)
+    if tenant:
+        available_roles = UserRole.objects.filter(tenant=tenant).order_by('name')
+    else:
+        available_roles = UserRole.objects.none()
+    
     if request.method == 'POST':
-        form = UserEditForm(request.POST, instance=user)
+        # Silmeden önce tekrar tenant kontrolü
+        if not is_root_admin(request.user) and hasattr(user, 'tenant') and user.tenant != tenant:
+            messages.error(request, "Bu kullanıcıyı düzenleme yetkiniz yok.")
+            return redirect('user_list')
+        
+        form = UserEditForm(request.POST, instance=user, request=request)
         if form.is_valid():
             user = form.save(commit=False)
+            
+            # Tenant'ı koru (değiştirilmesin)
+            if not is_root_admin(request.user) and tenant:
+                user.tenant = tenant
             
             # Özel alanları extra_data'ya kaydet
             if not user.extra_data:
@@ -133,9 +233,13 @@ def edit_user(request, pk):
             messages.success(request, "Güncellendi.")
             return redirect('user_list')
     else:
-        form = UserEditForm(instance=user)
+        form = UserEditForm(instance=user, request=request)
+        # Form'un queryset'ini zorla güncelle
+        if tenant:
+            form.fields['role'].queryset = available_roles
     
     return render(request, 'apps/users/edit_user.html', {
+        'available_roles': available_roles,  # Template'e de gönder
         'form': form, 
         'user': user,
         'user_field_defs': user_field_defs
@@ -168,11 +272,29 @@ def add_user_field(request):
 @login_required
 @root_admin_required
 def delete_user(request, pk):
-    user = get_object_or_404(CustomUser, pk=pk)
+    # Tenant kontrolü - MUTLAKA yapılmalı
+    tenant = get_current_tenant(request)
+    if not tenant:
+        messages.error(request, "Firma seçimi yapılmamış. Lütfen bir firma seçin.")
+        return redirect('user_list')
+    
+    # Sadece mevcut tenant'ın kullanıcılarını göster
+    user = get_object_or_404(filter_by_tenant(CustomUser.objects.all(), request), pk=pk)
+    
+    # Ekstra güvenlik: Tenant kontrolü (root admin bile başka tenant'ın kullanıcısını silememeli)
+    if hasattr(user, 'tenant') and user.tenant != tenant:
+        messages.error(request, "Bu kullanıcıyı silme yetkiniz yok. Farklı bir firmaya ait.")
+        return redirect('user_list')
+    
     if is_root_admin(user):
         messages.error(request, "Root Admin kullanıcısı silinemez.")
         return redirect('user_list')
+    
     if request.method == 'POST':
+        # Silmeden önce tekrar tenant kontrolü
+        if hasattr(user, 'tenant') and user.tenant != tenant:
+            messages.error(request, "Bu kullanıcıyı silme yetkiniz yok. Farklı bir firmaya ait.")
+            return redirect('user_list')
         user.delete()
         messages.warning(request, "Silindi.")
         return redirect('user_list')
@@ -181,7 +303,19 @@ def delete_user(request, pk):
 @login_required
 @root_admin_required
 def toggle_user_status(request, pk):
-    user = get_object_or_404(CustomUser, pk=pk)
+    # Tenant kontrolü
+    from apps.core.tenant_utils import get_current_tenant
+    tenant = get_current_tenant(request)
+    
+    if not is_root_admin(request.user):
+        user = get_object_or_404(filter_by_tenant(CustomUser.objects.all(), request), pk=pk)
+        # Ekstra güvenlik: Tenant kontrolü
+        if hasattr(user, 'tenant') and user.tenant != tenant:
+            messages.error(request, "Bu kullanıcıyı değiştirme yetkiniz yok.")
+            return redirect('user_list')
+    else:
+        user = get_object_or_404(CustomUser.objects.all(), pk=pk)
+    
     if is_root_admin(user):
         messages.error(request, "Root Admin pasife alınamaz.")
         return redirect('user_list')
@@ -193,7 +327,7 @@ def toggle_user_status(request, pk):
 @login_required
 @root_admin_required
 def export_users(request):
-    users = CustomUser.objects.all()
+    users = filter_by_tenant(CustomUser.objects.all(), request)
     data = []
     for u in users:
         data.append({
@@ -235,7 +369,11 @@ def import_users(request):
                 role_name = row.get('Rol')
                 role_obj = None
                 if role_name:
-                    role_obj, _ = UserRole.objects.get_or_create(name=role_name)
+                    tenant = get_current_tenant(request)
+                    if tenant:
+                        role_obj, _ = UserRole.objects.get_or_create(name=role_name, tenant=tenant)
+                    else:
+                        role_obj, _ = UserRole.objects.get_or_create(name=role_name, tenant=None)
 
                 # Kullanıcı verilerini hazırla
                 defaults = {
@@ -250,7 +388,7 @@ def import_users(request):
                 # Güncelleme veya Oluşturma
                 if not _is_blank(user_id):
                     try:
-                        user = CustomUser.objects.get(pk=int(float(str(user_id).strip())))
+                        user = filter_by_tenant(CustomUser.objects.all(), request).get(pk=int(float(str(user_id).strip())))
                         # Root Admin değiştirilemez
                         if root_admin and user.id == root_admin.id:
                             continue
@@ -272,6 +410,7 @@ def import_users(request):
                     if _is_blank(pwd):
                         pwd = "123"
                     user = CustomUser.objects.create(**defaults)
+                    set_tenant_on_save(user, request)
                     user.set_password(str(pwd))
                     user.save()
                     
@@ -284,17 +423,48 @@ def import_users(request):
 
 # --- HİYERARŞİ ---
 @login_required
-@root_admin_required
 def hierarchy(request):
-    # En azından Admin root düğümü olsun + root admin sabitlensin (SystemSetting)
+    # Tenant kontrolü
+    tenant = get_current_tenant(request)
+    if not tenant:
+        messages.error(request, "Firma seçimi yapılmamış.")
+        return redirect('home')
+    
+    # Root admin kontrolü - sadece root admin yeni düğüm oluşturabilir
     ensure_root_admin_configured(request.user)
-    admin_node = get_admin_node(create_if_missing=True)
-
-    qs = AuthorityNode.objects.select_related('assigned_user').all().order_by('sort_order', 'id')
+    is_root = is_root_admin(request.user)
+    
+    # Tenant'a göre filtrele
+    qs = filter_by_tenant(AuthorityNode.objects.select_related('assigned_user'), request).order_by('sort_order', 'id')
     all_nodes = list(qs.values(
         'id', 'authority', 'parent_id', 'sort_order', 'label',
         'assigned_user_id', 'assigned_user__first_name', 'assigned_user__last_name', 'assigned_user__user_code'
     ))
+
+    # Admin root düğümünü bul
+    admin_node = None
+    for n in all_nodes:
+        if n['authority'] == 'Admin' and n['parent_id'] is None:
+            admin_node = n
+            break
+    
+    # Admin node yoksa oluştur (sadece root admin)
+    if not admin_node and is_root:
+        admin_node_obj = AuthorityNode.objects.create(
+            authority='Admin',
+            parent=None,
+            sort_order=0,
+            tenant=tenant
+        )
+        admin_node = {
+            'id': admin_node_obj.id,
+            'authority': 'Admin',
+            'parent_id': None,
+            'sort_order': 0,
+            'label': '',
+            'assigned_user_id': None,
+        }
+        all_nodes.append(admin_node)
 
     # Sadece Admin'den aşağı bağlı olanları göster
     children = {}
@@ -304,21 +474,23 @@ def hierarchy(request):
             children.setdefault(p, []).append(n["id"])
 
     visible = set()
-    visible.add(admin_node.id)
-    stack = [admin_node.id]
-    while stack:
-        cur = stack.pop()
-        for ch in children.get(cur, []):
-            if ch not in visible:
-                visible.add(ch)
-                stack.append(ch)
+    if admin_node:
+        visible.add(admin_node['id'])
+        stack = [admin_node['id']]
+        while stack:
+            cur = stack.pop()
+            for ch in children.get(cur, []):
+                if ch not in visible:
+                    visible.add(ch)
+                    stack.append(ch)
 
     nodes = [n for n in all_nodes if n["id"] in visible]
-    users = list(CustomUser.objects.all().order_by('first_name', 'last_name').values('id', 'first_name', 'last_name', 'user_code', 'authority'))
+    users = list(filter_by_tenant(CustomUser.objects.all(), request).order_by('first_name', 'last_name').values('id', 'first_name', 'last_name', 'user_code', 'authority'))
     context = {
         'nodes_json': json.dumps(nodes, ensure_ascii=False),
         'users_json': json.dumps(users, ensure_ascii=False),
         'authority_choices': CustomUser.AUTHORITY_CHOICES,
+        'is_root_admin': is_root,
     }
     return render(request, 'apps/users/hierarchy.html', context)
 

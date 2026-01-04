@@ -139,6 +139,10 @@ class Tenant(models.Model):
     logo = models.ImageField(upload_to='tenant_logos/', blank=True, null=True, verbose_name="Logo")
     primary_color = models.CharField(max_length=7, default="#0d6efd", verbose_name="Ana Renk")
     
+    # Menü Görünürlük Ayarları (JSON)
+    # Örn: {"hierarchy": true, "users": true, "customers": true, "tasks": true, "route_plan": true, "forms": true, "images": false, "reports": true}
+    menu_settings = models.JSONField(default=dict, blank=True, verbose_name="Menü Ayarları", help_text="Hangi menülerin görünür olacağını belirler")
+    
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

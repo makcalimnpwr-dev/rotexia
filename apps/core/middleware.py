@@ -9,13 +9,18 @@ from .models import Tenant
 
 class TenantMiddleware(MiddlewareMixin):
     """
-    Request'ten tenant bilgisini çıkarır ve request.tenant'a ekler
+    Subdomain-only Multi-Tenancy Middleware
+    Sadece subdomain bazlı tenant belirleme yapar.
     
-    Tenant belirleme yöntemleri (öncelik sırasına göre):
+    Tenant belirleme yöntemi:
     1. Subdomain: tenant1.fieldops.com -> tenant slug: "tenant1"
-    2. URL parametresi: ?tenant=tenant1
-    3. Session: Daha önce seçilmiş tenant
-    4. User'ın varsayılan tenant'ı (ilk oluşturduğu)
+       - admin.fieldops.com -> Admin paneli (tenant=None)
+       - firma1.fieldops.com -> Tenant bulunur (slug="firma1")
+    
+    Development'ta localhost için:
+    - admin.localhost:8000 -> Admin paneli
+    - firma1.localhost:8000 -> Tenant bulunur
+    - localhost:8000 (subdomain yok) -> Admin paneline yönlendirilir (root admin için)
     """
     
     def process_request(self, request):
@@ -34,73 +39,63 @@ class TenantMiddleware(MiddlewareMixin):
             return None
 
         tenant = None
-        
-        # 1. Subdomain kontrolü (production'da)
         host = request.get_host()
-        if '.' in host:
-            subdomain = host.split('.')[0]
-            if subdomain not in ['www', 'admin', 'api']:
+        
+        # Subdomain çıkarma (localhost:8000 veya firma1.fieldops.com)
+        host_without_port = host.split(':')[0] if ':' in host else host
+        
+        # Subdomain kontrolü (nokta varsa subdomain var demektir)
+        if '.' in host_without_port:
+            parts = host_without_port.split('.')
+            subdomain = parts[0].lower()  # Küçük harfe çevir
+            
+            # Admin paneli için özel subdomain kontrolü
+            if subdomain == 'admin':
+                request.tenant = None
+                # Session temizle (subdomain-only mod)
+                if 'tenant_id' in request.session:
+                    del request.session['tenant_id']
+                if 'admin_panel_mode' in request.session:
+                    del request.session['admin_panel_mode']
+                return None
+            
+            # Diğer subdomain'ler için tenant bul
+            if subdomain not in ['www', 'api']:
                 try:
                     tenant = Tenant.objects.get(slug=subdomain, is_active=True)
+                    # Session temizle (subdomain-only mod, session kullanmıyoruz)
+                    if 'tenant_id' in request.session:
+                        del request.session['tenant_id']
+                    if 'admin_panel_mode' in request.session:
+                        del request.session['admin_panel_mode']
                 except Tenant.DoesNotExist:
-                    pass
-        
-        # 2. URL parametresi (?tenant=slug)
-        if not tenant and 'tenant' in request.GET:
-            tenant_slug = request.GET.get('tenant')
-            try:
-                tenant = Tenant.objects.get(slug=tenant_slug, is_active=True)
-                # Session'a kaydet
-                request.session['tenant_id'] = tenant.id
-            except Tenant.DoesNotExist:
-                pass
-        
-        # 3. Session'dan al
-        if not tenant and 'tenant_id' in request.session:
-            try:
-                tenant = Tenant.objects.get(
-                    id=request.session['tenant_id'],
-                    is_active=True
-                )
-            except Tenant.DoesNotExist:
-                # Geçersiz tenant_id, session'dan temizle
-                del request.session['tenant_id']
-        
-        # 4. User'ın varsayılan tenant'ı (eğer giriş yapmışsa)
-        if not tenant and request.user.is_authenticated:
-            # User modeline tenant ilişkisi eklenmeli (gelecekte)
-            # Şimdilik ilk aktif tenant'ı al (geliştirme için)
-            tenant = Tenant.objects.filter(is_active=True).first()
+                    # Subdomain var ama tenant bulunamadı - 404 benzeri durum
+                    # View'da handle edilecek
+                    tenant = None
+        else:
+            # Subdomain yok (localhost veya IP adresi - development)
+            # Development modunda session'dan tenant_id'yi oku (admin panelinden bağlanıldıysa)
+            tenant_id = request.session.get('tenant_id')
+            admin_from_panel = request.session.get('admin_from_panel', False)
+            
+            if tenant_id and admin_from_panel:
+                # Admin panelinden bağlanıldıysa, session'dan tenant'ı al
+                try:
+                    tenant = Tenant.objects.get(id=tenant_id, is_active=True)
+                except Tenant.DoesNotExist:
+                    # Geçersiz tenant_id, session'dan temizle
+                    for key in ['tenant_id', 'admin_from_panel', 'connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name']:
+                        request.session.pop(key, None)
+                    tenant = None
+            else:
+                # Normal durumda (subdomain-only mod)
+                tenant = None
+                # Session temizle (subdomain-only mod) - sadece admin_from_panel yoksa
+                if not admin_from_panel and 'tenant_id' in request.session:
+                    del request.session['tenant_id']
         
         # Request'e ekle
         request.tenant = tenant
-        
-        # Eğer tenant yoksa ve admin sayfası değilse, hata ver
-        # (Admin sayfasında tenant zorunlu değil - superuser için)
-        if not tenant and not request.path.startswith('/admin/'):
-            # İlk çalıştırmada tenant yoksa, varsayılan oluştur
-            if Tenant.objects.count() == 0:
-                from .models import Plan
-                # Varsayılan plan oluştur
-                default_plan, _ = Plan.objects.get_or_create(
-                    name="Ücretsiz Plan",
-                    defaults={
-                        'plan_type': 'basic',
-                        'price_monthly': 0,
-                        'max_users': 3,
-                        'max_customers': 20,
-                        'max_tasks_per_month': 100,
-                    }
-                )
-                # Varsayılan tenant oluştur
-                tenant = Tenant.objects.create(
-                    name="Varsayılan Şirket",
-                    slug="default",
-                    email="admin@example.com",
-                    plan=default_plan,
-                    is_active=True
-                )
-                request.tenant = tenant
         
         return None
 

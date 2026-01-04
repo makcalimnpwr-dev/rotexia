@@ -37,19 +37,41 @@ class Customer(models.Model):
     tenant = models.ForeignKey(
         'core.Tenant',
         on_delete=models.CASCADE,
-        verbose_name="Kiracı",
+        verbose_name="Firma",
         null=True,  # Geçici olarak null=True (migration için)
         blank=True
     )
     
+    # Tenant-specific Sistem ID (Her firma için 1'den başlayan seri)
+    sys_id = models.PositiveIntegerField(null=True, blank=True, verbose_name="Sistem ID", help_text="Firma içinde otomatik atanır (1, 2, 3...)")
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        # Eğer yeni kayıt ve sys_id yoksa, tenant'a göre sys_id ata
+        if not self.pk and not self.sys_id and self.tenant:
+            # Bu tenant'ın en yüksek sys_id'sini bul
+            max_sys_id = Customer.objects.filter(tenant=self.tenant).aggregate(
+                max_id=models.Max('sys_id')
+            )['max_id'] or 0
+            self.sys_id = max_sys_id + 1
+        
+        super().save(*args, **kwargs)
+    
+    def get_sys_id_display(self):
+        """Sistem ID'yi M-{sys_id} formatında döndür"""
+        if self.sys_id:
+            return f"M-{self.sys_id}"
+        return f"M-{self.id}"  # Fallback: eski ID kullan
 
     def __str__(self):
         return f"{self.customer_code} - {self.name}"
 
     class Meta:
         ordering = ['-created_at']
+        # Her tenant için sys_id benzersiz olmalı
+        unique_together = [('tenant', 'sys_id')]
 
 class CustomerFieldDefinition(models.Model):
     name = models.CharField(max_length=100, verbose_name="Alan Adı") 

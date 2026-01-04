@@ -51,8 +51,20 @@
                     <div class="row g-3">
                       <div class="col-md-6">
                         <label class="form-label fw-bold text-dark">Rol / Görev</label>
-                        {{ form.role }}
+                        <select name="role" id="id_role" class="form-select" required>
+                          <option value="">Rol Seçiniz</option>
+                          {% for role in available_roles %}
+                            <option value="{{ role.id }}" {% if form.role.value == role.id or user.role.id == role.id %}selected{% endif %}>
+                              {{ role.name }}
+                            </option>
+                          {% empty %}
+                            <option value="" disabled>Bu firmada henüz rol tanımlanmamış</option>
+                          {% endfor %}
+                        </select>
                         {% for err in form.role.errors %}<div class="text-danger small mt-1">{{ err }}</div>{% endfor %}
+                        {% if not available_roles %}
+                          <div class="text-warning small mt-1">⚠️ Önce ayarlardan rol eklemelisiniz.</div>
+                        {% endif %}
                       </div>
                       <div class="col-md-6">
                         <label class="form-label fw-bold text-dark">Yetki</label>

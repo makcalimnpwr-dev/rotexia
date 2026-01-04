@@ -1,12 +1,13 @@
-from django.shortcuts import render, redirect
-from django.contrib.auth import login, get_user_model
+from django.shortcuts import render, redirect, get_object_or_404
+from django.contrib.auth import login, get_user_model, authenticate
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.db import models
 from django.core.files.base import ContentFile
-from .models import SystemSetting
+from django.conf import settings
+from .models import SystemSetting, Tenant
 # VisitTask modelini doğru adresten çağırıyoruz:
 from apps.field_operations.models import VisitTask
 from .utils import calculate_distance
@@ -17,7 +18,8 @@ from django.http import HttpResponseForbidden
 from django.http import HttpResponse
 from apps.users.hierarchy_access import get_hierarchy_scope_for_user
 from apps.users.utils import ensure_root_admin_configured, get_assigned_user_ids_under_admin_node, is_root_admin
-from apps.users.models import UserRole
+from apps.users.decorators import root_admin_required
+from apps.users.models import UserRole, CustomUser
 
 
 # Gerekli Modeller
@@ -101,72 +103,82 @@ from .models import SystemSetting
 
 @login_required
 def settings_home(request):
+    """
+    Ayarlar sayfası - Admin paneli veya firma paneli
+    Subdomain-only mod: request.tenant'a göre yönlendirir
+    """
+    # Middleware'den gelen tenant bilgisini kontrol et (subdomain-only mod)
+    tenant = getattr(request, 'tenant', None)
+    host = request.get_host()
+    host_without_port = host.split(':')[0] if ':' in host else host
     
-    # --- 0. ESKİ AYARLARI MİGRATE ET ---
-    # Eğer eski require_gps ayarı varsa, distance_rule olarak güncelle
-    old_require_gps = SystemSetting.objects.filter(key='require_gps').first()
-    if old_require_gps:
-        # Yeni ayar zaten var mı kontrol et
-        if not SystemSetting.objects.filter(key='distance_rule').exists():
-            # Eski ayarı yeni isimle güncelle
-            old_require_gps.key = 'distance_rule'
-            old_require_gps.label = 'Mesafe Kuralı'
-            old_require_gps.description = 'Açık: Giriş mesafesi ve gezinme mesafesi kontrolü yapılır. Kapalı: Mesafe kontrolü yapılmaz, herhangi bir mesafeden ziyaret başlatılabilir.'
-            old_require_gps.save()
+    # Subdomain kontrolü
+    is_admin_subdomain = False
+    if '.' in host_without_port:
+        parts = host_without_port.split('.')
+        subdomain = parts[0].lower()
+        is_admin_subdomain = (subdomain == 'admin')
+    
+    # Admin subdomain'inde veya tenant yoksa -> admin ayarları
+    if is_admin_subdomain or not tenant:
+        if is_root_admin(request.user):
+            return redirect('admin_settings')
         else:
-            # Yeni ayar zaten varsa, eski ayarı sil
-            old_require_gps.delete()
+            messages.error(request, 'Admin paneline erişim yetkiniz yok.')
+            return redirect('home')
     
-    # --- 1. ÖNCE TEMİZLİK (Eski/Bozuk verileri sil) ---
-    # Eğer hiç ayar görünmüyorsa, bu satır tabloyu sıfırlar ve temiz kurulum yapar.
-    if not SystemSetting.objects.exists() or request.GET.get('reset') == 'true':
-        SystemSetting.objects.all().delete()
-        
-        defaults = [
-            {
-                'key': 'app_sync_interval', 'label': 'Mobil Senkronizasyon (Dakika)', 'value': '15',
-                'category': 'general', 'input_type': 'number', 'description': 'Veri alışverişi kaç dakikada bir yapılsın?'
-            },
-            {
-                'key': 'data_sync_interval_minutes', 'label': 'Veri Paylaşma Süresi (Dakika)', 'value': '15',
-                'category': 'general', 'input_type': 'number', 'description': 'Form verileri kaç dakikada bir otomatik gönderilsin? (Ziyaret başlatma gibi işlemler anlık gönderilir)'
-            },
-            {
-                'key': 'maintenance_mode', 'label': 'Bakım Modu', 'value': 'False',
-                'category': 'general', 'input_type': 'bool', 'description': 'Açılırsa sadece yöneticiler sisteme girebilir.'
-            },
-            {
-                'key': 'visit_radius', 'label': 'Mağaza Giriş Mesafesi (Metre)', 'value': '300',
-                'category': 'visit', 'input_type': 'number', 'description': 'Mağazaya kaç metre yaklaşınca buton açılsın?'
-            },
-            {
-                'key': 'distance_rule', 'label': 'Mesafe Kuralı', 'value': 'True',
-                'category': 'visit', 'input_type': 'bool', 'description': 'Açık: Giriş mesafesi ve gezinme mesafesi kontrolü yapılır. Kapalı: Mesafe kontrolü yapılmaz, herhangi bir mesafeden ziyaret başlatılabilir.'
-            },
-            {
-                'key': 'wander_radius', 'label': 'Gezinme Sınırı (Metre)', 'value': '500',
-                'category': 'visit', 'input_type': 'number', 'description': 'Ziyaret sırasında mağaza konumundan maksimum uzaklaşma mesafesi. Bu mesafeyi aşarsa ziyaret otomatik bitirilir.'
-            },
-            {
-                'key': 'daily_start_hour', 'label': 'Mesai Başlangıç Saati', 'value': '08:00',
-                'category': 'user', 'input_type': 'text', 'description': 'Bu saatten önce ziyaret başlatılamaz.'
-            }
-        ]
-        
-        for item in defaults:
-            SystemSetting.objects.create(**item)
-        
-        messages.info(request, '🔄 Sistem ayarları fabrika ayarlarına döndürüldü.')
+    # Firma subdomain'inde ve tenant var -> firma ayarları
+    if tenant:
+        return redirect('tenant_settings')
+    
+    # Fallback
+    messages.warning(request, 'Ayarlar sayfasına erişilemedi.')
+    return redirect('home')
 
-    # --- 2. GÜNCELLEME İŞLEMİ ---
+@login_required
+@root_admin_required
+def admin_settings(request):
+    """
+    Admin Paneli Ayarları - Global/Şablon ayarlar
+    Burada eklenen içerikler firmalara otomatik aktarılmaz
+    Subdomain-only mod: Sadece admin.fieldops.com'dan erişilmeli
+    """
+    # Admin panelinde tenant olmamalı
+    request.tenant = None
+    
+    # Subdomain kontrolü - admin subdomain'inde miyiz?
+    host = request.get_host()
+    host_without_port = host.split(':')[0] if ':' in host else host
+    is_admin_subdomain = False
+    if '.' in host_without_port:
+        parts = host_without_port.split('.')
+        subdomain = parts[0].lower()
+        is_admin_subdomain = (subdomain == 'admin')
+    
+    # Admin subdomain'inde değilsek ve subdomain varsa, uyarı ver
+    if not is_admin_subdomain and '.' in host_without_port:
+        # Firma subdomain'indeyiz, admin ayarlarına erişim yok
+        messages.warning(request, 'Admin ayarlarına sadece admin subdomain\'inden erişebilirsiniz.')
+        # Firma subdomain'ine geri dön
+        tenant = getattr(request, 'tenant', None)
+        if tenant:
+            if settings.DEBUG:
+                return redirect(f"http://{tenant.slug}.localhost:8000/tenant/settings/")
+            else:
+                domain = getattr(settings, 'SUBDOMAIN_DOMAIN', 'fieldops.com')
+                protocol = 'https' if not settings.DEBUG else 'http'
+                return redirect(f"{protocol}://{tenant.slug}.{domain}/tenant/settings/")
+    
+    # --- POST İŞLEMLERİ ---
     if request.method == 'POST':
-        # Handle role add/delete
+        # Handle role add/delete (tenant=None - admin paneli için global roller)
         if 'add_role' in request.POST:
             role_name = request.POST.get('role_name', '').strip()
             if role_name:
-                if not UserRole.objects.filter(name=role_name).exists():
-                    UserRole.objects.create(name=role_name)
-                    messages.success(request, f'✅ Rol "{role_name}" eklendi.')
+                # Admin panelinde tenant=None ile oluştur
+                if not UserRole.objects.filter(name=role_name, tenant__isnull=True).exists():
+                    UserRole.objects.create(name=role_name, tenant=None)
+                    messages.success(request, f'✅ Rol "{role_name}" eklendi (Global Şablon).')
                 else:
                     messages.warning(request, f'⚠️ Rol "{role_name}" zaten mevcut.')
             else:
@@ -175,14 +187,15 @@ def settings_home(request):
             role_id = request.POST.get('role_id')
             if role_id:
                 try:
-                    role = UserRole.objects.get(id=role_id)
+                    # Sadece tenant=None olan rolleri sil (admin paneli rolleri)
+                    role = UserRole.objects.get(id=role_id, tenant__isnull=True)
                     role_name = role.name
                     role.delete()
                     messages.success(request, f'✅ Rol "{role_name}" silindi.')
                 except UserRole.DoesNotExist:
-                    messages.error(request, '❌ Rol bulunamadı.')
+                    messages.error(request, '❌ Rol bulunamadı veya bu rol silinemez.')
         
-        # Handle regular settings update
+        # Handle regular settings update (global ayarlar)
         all_settings = SystemSetting.objects.all()
         for setting in all_settings:
             if setting.input_type == 'bool':
@@ -196,7 +209,149 @@ def settings_home(request):
         
         if 'add_role' not in request.POST and 'delete_role' not in request.POST:
             messages.success(request, '✅ Ayarlar kaydedildi.')
-        return redirect('settings_home')
+        return redirect('admin_settings')
+    
+    # --- VERİLERİ ÇEK (TENANT=None - GLOBAL) ---
+    settings_general = SystemSetting.objects.filter(category='general')
+    settings_visit = SystemSetting.objects.filter(category='visit')
+    settings_user = SystemSetting.objects.filter(category='user')
+    # Admin panelinde sadece tenant=None olan rolleri göster (global şablonlar)
+    user_roles = UserRole.objects.filter(tenant__isnull=True).order_by('name')
+
+    context = {
+        'is_admin_panel': True,
+        'settings_general': settings_general,
+        'settings_visit': settings_visit,
+        'settings_user': settings_user,
+        'user_roles': user_roles,
+    }
+    return render(request, 'apps/Core/settings.html', context)
+
+@login_required
+def tenant_settings(request):
+    """
+    Firma Paneli Ayarları - Tenant-specific ayarlar
+    Sadece seçili firmanın kendi ayarları görünür
+    """
+    from apps.core.tenant_utils import get_current_tenant, filter_by_tenant
+    from apps.core.models import Tenant
+    
+    # Önce request.tenant'ı kontrol et (middleware'den)
+    tenant = getattr(request, 'tenant', None)
+    
+    # Eğer request.tenant yoksa, session'dan al
+    if not tenant and 'tenant_id' in request.session:
+        try:
+            tenant = Tenant.objects.get(id=request.session['tenant_id'], is_active=True)
+        except Tenant.DoesNotExist:
+            del request.session['tenant_id']
+            tenant = None
+    
+    # Hala tenant yoksa, get_current_tenant'ı kullan (fallback)
+    if not tenant:
+        tenant = get_current_tenant(request)
+    
+    if not tenant:
+        messages.error(request, '❌ Firma seçimi yapılmamış! Lütfen üst menüden bir firma seçin.')
+        return redirect('home')
+    
+    # --- POST İŞLEMLERİ ---
+    if request.method == 'POST':
+        from apps.core.tenant_utils import set_tenant_on_save
+        
+        # Handle role add/delete (tenant-specific)
+        if 'add_role' in request.POST:
+            role_name = request.POST.get('role_name', '').strip()
+            if role_name:
+                # DEBUG: Tenant bilgisini kontrol et ve logla
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"DEBUG tenant_settings: tenant={tenant}, tenant_id={tenant.id if tenant else None}, tenant_name={tenant.name if tenant else None}")
+                logger.error(f"DEBUG session: tenant_id={request.session.get('tenant_id', 'YOK')}")
+                logger.error(f"DEBUG request.tenant: {getattr(request, 'tenant', 'YOK')}")
+                
+                if not tenant:
+                    messages.error(request, '❌ Firma seçimi bulunamadı! Rol eklenemedi. Lütfen üst menüden bir firma seçin.')
+                    return redirect('tenant_settings')
+                
+                # Bu firmanın rolleri arasında kontrol et
+                existing_role = UserRole.objects.filter(name=role_name, tenant=tenant).first()
+                if not existing_role:
+                    # Tenant'ı direkt ata - MUTLAKA tenant_id ile
+                    role = UserRole(name=role_name, tenant_id=tenant.id)  # tenant_id kullan
+                    role.save()
+                    
+                    # DEBUG: Kayıt kontrolü - refresh from DB
+                    role.refresh_from_db()
+                    if role.tenant_id != tenant.id:
+                        logger.error(f"DEBUG: Rol kaydedildi ama tenant yanlış! role.tenant_id={role.tenant_id}, tenant.id={tenant.id}")
+                        messages.error(request, f'❌ Rol kaydedilirken hata oluştu! Tenant: {role.tenant_id} != {tenant.id}')
+                    else:
+                        logger.error(f"DEBUG: Rol başarıyla kaydedildi! role.tenant_id={role.tenant_id}, tenant.id={tenant.id}")
+                        messages.success(request, f'✅ Rol "{role_name}" "{tenant.name}" firmasına eklendi.')
+                else:
+                    messages.warning(request, f'⚠️ Rol "{role_name}" bu firmada zaten mevcut.')
+            else:
+                messages.error(request, '❌ Rol adı boş olamaz.')
+        elif 'delete_role' in request.POST:
+            role_id = request.POST.get('role_id')
+            if role_id:
+                try:
+                    # Sadece bu firmanın rollerini sil
+                    role = get_object_or_404(filter_by_tenant(UserRole.objects.all(), request), id=role_id)
+                    role_name = role.name
+                    role.delete()
+                    messages.success(request, f'✅ Rol "{role_name}" silindi.')
+                except:
+                    messages.error(request, '❌ Rol bulunamadı veya bu rol silinemez.')
+        
+        # Handle regular settings update (tenant-specific)
+        all_settings = filter_by_tenant(SystemSetting.objects.all(), request)
+        for setting in all_settings:
+            if setting.input_type == 'bool':
+                new_val = 'True' if request.POST.get(setting.key) == 'on' else 'False'
+            else:
+                new_val = request.POST.get(setting.key)
+            
+            if new_val is not None:
+                setting.value = new_val
+                setting.save()
+        
+        if 'add_role' not in request.POST and 'delete_role' not in request.POST:
+            messages.success(request, '✅ Ayarlar kaydedildi.')
+        return redirect('tenant_settings')
+    
+    # --- VERİLERİ ÇEK (TENANT-SPECIFIC) ---
+    settings_general = filter_by_tenant(SystemSetting.objects.filter(category='general'), request)
+    settings_visit = filter_by_tenant(SystemSetting.objects.filter(category='visit'), request)
+    settings_user = filter_by_tenant(SystemSetting.objects.filter(category='user'), request)
+    # Sadece bu firmanın rolleri
+    user_roles = filter_by_tenant(UserRole.objects.all(), request).order_by('name')
+
+    context = {
+        'is_admin_panel': False,
+        'tenant': tenant,
+        'settings_general': settings_general,
+        'settings_visit': settings_visit,
+        'settings_user': settings_user,
+        'user_roles': user_roles,
+    }
+    return render(request, 'apps/Core/settings.html', context)
+
+# Eğer eski require_gps ayarı varsa, distance_rule olarak güncelle (migration helper)
+def migrate_old_settings():
+    old_require_gps = SystemSetting.objects.filter(key='require_gps').first()
+    if old_require_gps:
+        # Yeni ayar zaten var mı kontrol et
+        if not SystemSetting.objects.filter(key='distance_rule').exists():
+            # Eski ayarı yeni isimle güncelle
+            old_require_gps.key = 'distance_rule'
+            old_require_gps.label = 'Mesafe Kuralı'
+            old_require_gps.description = 'Açık: Giriş mesafesi ve gezinme mesafesi kontrolü yapılır. Kapalı: Mesafe kontrolü yapılmaz, herhangi bir mesafeden ziyaret başlatılabilir.'
+            old_require_gps.save()
+        else:
+            # Yeni ayar zaten varsa, eski ayarı sil
+            old_require_gps.delete()
     
     # CASUS KOD BAŞLANGICI
     print("----------------------------------------")
@@ -227,12 +382,142 @@ def settings_home(request):
     return render(request, 'apps/Core/settings.html', context)
 
 # --- AKILLI ANASAYFA ---
-@login_required
+def index(request):
+    """Ana sayfa - Firma adı girme ekranı (PUBLIC - Herkes erişebilir)"""
+    # Eğer kullanıcı zaten giriş yapmışsa, root admin ise admin_home'a, değilse logout yap
+    if request.user.is_authenticated:
+        from apps.users.utils import is_root_admin
+        if is_root_admin(request.user):
+            return redirect('admin_home')
+        else:
+            # Normal kullanıcı için subdomain gerekli - logout yapıp ana sayfayı göster
+            from django.contrib.auth import logout
+            logout(request)
+    
+    return render(request, 'index.html')
+
+def company_connect(request):
+    """Firma adı girildikten sonra, firmanın login sayfasına yönlendir"""
+    if request.method == 'POST':
+        company_name = request.POST.get('company_name', '').strip()
+        
+        if not company_name:
+            messages.error(request, 'Lütfen firma adı girin.')
+            return redirect('index')
+        
+        # "Rotexia" yazıldıysa admin login'e yönlendir
+        if company_name.lower() == 'rotexia':
+            return redirect('admin_login')
+        
+        # Firma adından tenant'ı bul
+        from django.utils.text import slugify
+        slug = slugify(company_name)
+        
+        try:
+            tenant = Tenant.objects.filter(
+                models.Q(slug=slug) | models.Q(name__iexact=company_name),
+                is_active=True
+            ).first()
+            
+            if not tenant:
+                messages.error(request, f'"{company_name}" adında bir firma bulunamadı.')
+                return redirect('index')
+            
+            # Firma bilgilerini session'a kaydet (login sayfasında kullanılacak)
+            request.session['connect_tenant_id'] = tenant.id
+            request.session['connect_tenant_slug'] = tenant.slug
+            request.session['connect_tenant_color'] = tenant.primary_color
+            request.session['connect_tenant_name'] = tenant.name
+            
+            # Login sayfasına yönlendir (CustomLoginView tenant bilgisini session'dan alacak)
+            return redirect('login')
+            
+        except Exception as e:
+            messages.error(request, f'Firma bulunurken hata oluştu: {str(e)}')
+            return redirect('index')
+    
+    return redirect('index')
+
+def login_with_tenant(request, tenant_slug):
+    """Firma rengine göre dinamik login sayfası - Legacy support, ana sayfaya yönlendir"""
+    # Bu URL artık kullanılmıyor, önce ana sayfaya gitmesi gerekiyor
+    try:
+        tenant = Tenant.objects.get(slug=tenant_slug, is_active=True)
+        # Session'a tenant bilgilerini kaydet
+        request.session['connect_tenant_id'] = tenant.id
+        request.session['connect_tenant_slug'] = tenant.slug
+        request.session['connect_tenant_color'] = tenant.primary_color
+        request.session['connect_tenant_name'] = tenant.name
+        # Login sayfasına yönlendir
+        return redirect('login')
+    except Tenant.DoesNotExist:
+        messages.error(request, 'Firma bulunamadı.')
+        return redirect('index')
+
 def home(request):
     """
-    Backend tarafında cihaz kontrolü yapar.
-    Ancak asıl işi Login ekranındaki JavaScript yapacak.
+    Dashboard sayfası - Development'ta session bazlı, production'da subdomain bazlı
+    
+    Development: localhost:8000 -> Session'dan tenant bilgisi alınır
+    Production: firma1.fieldops.com -> Middleware'den tenant bilgisi gelir
     """
+    # MANUEL GİRİŞ KONTROLÜ - Her zaman giriş yapılması gerekiyor
+    if not request.user.is_authenticated:
+        messages.error(request, 'Lütfen giriş yapın.')
+        return redirect('index')
+    
+    # Önce middleware'den gelen tenant bilgisini kontrol et
+    tenant = getattr(request, 'tenant', None)
+    host = request.get_host()
+    host_without_port = host.split(':')[0] if ':' in host else host
+    
+    # Subdomain kontrolü (127.0.0.1 veya localhost gibi durumlar için)
+    has_subdomain = '.' in host_without_port and host_without_port not in ['127.0.0.1', 'localhost']
+    subdomain = None
+    if has_subdomain:
+        parts = host_without_port.split('.')
+        subdomain = parts[0].lower()
+    
+    # Root admin kontrolü - Admin panelinden bağlanıldıysa tenant paneline git
+    admin_from_panel = request.session.get('admin_from_panel', False)
+    if is_root_admin(request.user) and not admin_from_panel:
+        # Admin panelinden bağlanılmadıysa, root admin'i admin paneline yönlendir
+        if subdomain == 'admin':
+            return redirect('admin_home')
+        if not has_subdomain:
+            return redirect('admin_home')
+    
+    # Tenant'ı middleware'den al (subdomain veya session'dan)
+    tenant = getattr(request, 'tenant', None)
+    
+    # Subdomain yoksa (development - localhost:8000 veya 127.0.0.1:8000)
+    if not has_subdomain:
+        # Middleware zaten session'dan tenant'ı okumuş olmalı
+        if not tenant:
+            # Admin panelinden bağlanıldıysa session'dan tenant'ı tekrar oku
+            admin_from_panel = request.session.get('admin_from_panel', False)
+            if admin_from_panel:
+                tenant_id = request.session.get('tenant_id') or request.session.get('connect_tenant_id')
+                if tenant_id:
+                    try:
+                        tenant = Tenant.objects.get(id=tenant_id, is_active=True)
+                        request.tenant = tenant  # Request'e ekle
+                    except Tenant.DoesNotExist:
+                        pass
+            
+            # Hala tenant yoksa ana sayfaya yönlendir
+            if not tenant:
+                messages.error(request, 'Firma bilgisi bulunamadı. Lütfen firma adınızı girin.')
+                return redirect('index')
+    
+    # Subdomain var ama tenant bulunamadı
+    if has_subdomain and not tenant:
+        messages.error(request, f'"{subdomain}" subdomain\'i için firma bulunamadı. Lütfen admin panelinden firma oluşturun.')
+        if is_root_admin(request.user):
+            return redirect('admin_home')
+        else:
+            return redirect('index')
+    
     user_agent = request.META.get('HTTP_USER_AGENT', '').lower()
     mobile_keywords = ['mobile', 'android', 'iphone', 'ipad', 'webos', 'ipod']
     
@@ -241,10 +526,11 @@ def home(request):
     if is_mobile:
         return redirect('mobile_home')
     else:
-        # MASAÜSTÜ DASHBOARD
-        total_tasks = VisitTask.objects.count()
-        completed_tasks = VisitTask.objects.filter(status='completed').count()
-        today_tasks = VisitTask.objects.filter(planned_date=date.today())
+        # MASAÜSTÜ DASHBOARD - Tenant'a göre filtrele
+        from apps.core.tenant_utils import filter_by_tenant
+        total_tasks = filter_by_tenant(VisitTask.objects.all(), request).count()
+        completed_tasks = filter_by_tenant(VisitTask.objects.all(), request).filter(status='completed').count()
+        today_tasks = filter_by_tenant(VisitTask.objects.all(), request).filter(planned_date=date.today())
         today_done = today_tasks.filter(status='completed').count()
         
         daily_performance = 0
@@ -252,6 +538,7 @@ def home(request):
             daily_performance = int((today_done / today_tasks.count()) * 100)
 
         context = {
+            'tenant': tenant,
             'kpi': {
                 'total_tasks': total_tasks,
                 'completed_tasks': completed_tasks,
@@ -266,6 +553,635 @@ def healthz(request):
     Render/healthcheck endpoint. Always returns 200.
     """
     return HttpResponse("ok", content_type="text/plain")
+
+# --- ÖZEL GİRİŞ VIEW (Firma Adı ile) ---
+from django.contrib.auth.views import LoginView
+from django.contrib.auth import authenticate, login
+from django.views.decorators.csrf import csrf_protect
+from django.utils.decorators import method_decorator
+from django.urls import reverse_lazy
+from django.utils.text import slugify
+
+@method_decorator(csrf_protect, name='dispatch')
+class CustomLoginView(LoginView):
+    template_name = 'registration/login.html'
+    redirect_authenticated_user = True
+    
+    def get(self, request, *args, **kwargs):
+        """GET request - Eğer tenant bilgisi yoksa ana sayfaya yönlendir"""
+        # Session'da tenant bilgisi var mı kontrol et
+        tenant_id = request.session.get('connect_tenant_id')
+        tenant_slug = request.session.get('connect_tenant_slug')
+        
+        # Eğer tenant bilgisi yoksa, ana sayfaya (Bağlan sayfasına) yönlendir
+        if not tenant_id or not tenant_slug:
+            return redirect('index')
+        
+        # Tenant bilgisi varsa login_tenant.html template'ini kullan
+        try:
+            tenant = Tenant.objects.get(id=tenant_id, slug=tenant_slug, is_active=True)
+            context = {
+                'tenant': tenant,
+                'primary_color': request.session.get('connect_tenant_color', tenant.primary_color),
+            }
+            return render(request, 'registration/login_tenant.html', context)
+        except Tenant.DoesNotExist:
+            # Tenant bulunamazsa session'ı temizle ve ana sayfaya yönlendir
+            request.session.pop('connect_tenant_id', None)
+            request.session.pop('connect_tenant_slug', None)
+            request.session.pop('connect_tenant_color', None)
+            request.session.pop('connect_tenant_name', None)
+            return redirect('index')
+    
+    def post(self, request, *args, **kwargs):
+        username = request.POST.get('username', '').strip()
+        password = request.POST.get('password', '')
+        
+        # Tenant bilgisini session'dan al
+        tenant_id = request.session.get('connect_tenant_id')
+        tenant_slug = request.session.get('connect_tenant_slug')
+        
+        # Eğer session'da tenant bilgisi yoksa ana sayfaya yönlendir
+        if not tenant_id or not tenant_slug:
+            messages.error(request, 'Lütfen önce firma adını girin.')
+            return redirect('index')
+        
+        # Tenant'ı bul
+        try:
+            tenant = Tenant.objects.get(id=tenant_id, slug=tenant_slug, is_active=True)
+        except Tenant.DoesNotExist:
+            messages.error(request, 'Firma bulunamadı. Lütfen tekrar deneyin.')
+            request.session.pop('connect_tenant_id', None)
+            request.session.pop('connect_tenant_slug', None)
+            return redirect('index')
+        
+        # Kullanıcıyı doğrula
+        user = authenticate(request, username=username, password=password)
+        if user is not None and user.is_active:
+            # Root admin kontrolü - root admin her tenant'a giriş yapabilir
+            from apps.users.utils import is_root_admin
+            
+            if not is_root_admin(user):
+                # Normal kullanıcı için tenant kontrolü
+                # Kullanıcının tenant'ı varsa ve seçilen tenant ile eşleşmiyorsa hata ver
+                if hasattr(user, 'tenant') and user.tenant:
+                    if user.tenant != tenant:
+                        messages.error(request, f'Bu kullanıcı "{user.tenant.name}" firmasına aittir. Lütfen doğru firmayı seçin.')
+                        return self.form_invalid(self.get_form())
+                else:
+                    # Kullanıcının tenant'ı yoksa, seçilen tenant'ı ata (eski kullanıcılar için)
+                    user.tenant = tenant
+                    user.save()
+                    messages.info(request, f'Kullanıcınız "{tenant.name}" firmasına atandı.')
+            
+            login(request, user)
+            # Tenant'ı session'a kaydet
+            request.session['tenant_id'] = tenant.id
+            # Bağlanma session bilgilerini temizle (artık gerekli değil)
+            request.session.pop('connect_tenant_id', None)
+            request.session.pop('connect_tenant_slug', None)
+            request.session.pop('connect_tenant_color', None)
+            request.session.pop('connect_tenant_name', None)
+            # Redirect URL'i belirle
+            redirect_url = self.get_success_url()
+            return redirect(redirect_url)
+        else:
+            messages.error(request, 'Kullanıcı adı veya şifre hatalı.')
+            return self.form_invalid(self.get_form())
+    
+
+# --- GELİŞTİRİCİ ADMIN GİRİŞİ ---
+@method_decorator(csrf_protect, name='dispatch')
+class AdminLoginView(LoginView):
+    template_name = 'registration/admin_login.html'
+    redirect_authenticated_user = True
+    
+    def post(self, request, *args, **kwargs):
+        """Admin girişi için firma adı gerektirmez, sadece kullanıcı adı ve şifre"""
+        username = request.POST.get('username', '').strip()
+        password = request.POST.get('password', '')
+        
+        # Kullanıcıyı doğrula (firma kontrolü yok)
+        user = authenticate(request, username=username, password=password)
+        if user is not None and user.is_active:
+            login(request, user)
+            # Admin girişinde tenant session'ını temizle
+            if 'tenant_id' in request.session:
+                del request.session['tenant_id']
+            # Redirect URL'i belirle
+            redirect_url = self.get_success_url()
+            return redirect(redirect_url)
+        else:
+            messages.error(request, 'Kullanıcı adı veya şifre hatalı.')
+            return self.form_invalid(self.get_form())
+    
+    def get_success_url(self):
+        # Root admin kontrolü
+        if is_root_admin(self.request.user):
+            return reverse_lazy('admin_home')
+        return reverse_lazy('home')
+
+# --- LOGOUT VIEW ---
+from django.contrib.auth import logout as auth_logout
+
+def logout_view(request):
+    """Logout ve session temizleme - Tenant varsa o tenant'ın login sayfasına yönlendir"""
+    tenant_id = request.session.get('tenant_id')
+    tenant_slug = request.session.get('connect_tenant_slug')
+    tenant_name = request.session.get('connect_tenant_name')
+    
+    auth_logout(request)
+    
+    # Tenant bilgilerini temizle
+    for key in ['tenant_id', 'connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel']:
+        request.session.pop(key, None)
+    
+    # Eğer tenant varsa, o tenant'ın login sayfasına yönlendir
+    if tenant_slug:
+        # Tenant bilgisini logout sonrası için sakla
+        request.session['from_tenant_logout'] = True
+        request.session['logout_tenant_slug'] = tenant_slug
+        request.session['logout_tenant_name'] = tenant_name or 'Firma'
+        
+        # Login sayfasına yönlendir (tenant bilgisi session'da)
+        return redirect('login')
+    else:
+        # Tenant yoksa direkt login sayfasına git
+        return redirect('login')
+
+# --- ADMIN AYARLARI GÜNCELLEME ---
+@login_required
+@root_admin_required
+def admin_update_settings(request):
+    """Admin kullanıcı adı ve şifre güncelleme"""
+    if request.method == 'POST':
+        new_username = request.POST.get('username', '').strip()
+        new_password = request.POST.get('password', '').strip()
+        password_confirm = request.POST.get('password_confirm', '').strip()
+        
+        if not new_username:
+            messages.error(request, 'Kullanıcı adı boş olamaz.')
+            return redirect(request.META.get('HTTP_REFERER', 'admin_home'))
+        
+        # Kullanıcı adı değiştir
+        if new_username != request.user.username:
+            # Kullanıcı adı benzersiz mi kontrol et
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            if User.objects.filter(username=new_username).exclude(id=request.user.id).exists():
+                messages.error(request, 'Bu kullanıcı adı zaten kullanılıyor.')
+                return redirect(request.META.get('HTTP_REFERER', 'admin_home'))
+            request.user.username = new_username
+        
+        # Şifre değiştir
+        if new_password:
+            if new_password != password_confirm:
+                messages.error(request, 'Şifreler eşleşmiyor.')
+                return redirect(request.META.get('HTTP_REFERER', 'admin_home'))
+            if len(new_password) < 6:
+                messages.error(request, 'Şifre en az 6 karakter olmalıdır.')
+                return redirect(request.META.get('HTTP_REFERER', 'admin_home'))
+            request.user.set_password(new_password)
+        
+        request.user.save()
+        messages.success(request, 'Ayarlar başarıyla güncellendi. Yeniden giriş yapmanız gerekiyor.')
+        
+        # Çıkış yap ve login sayfasına yönlendir
+        from django.contrib.auth import logout
+        logout(request)
+        return redirect('login')
+    
+    return redirect('admin_home')
+
+# --- GELİŞTİRİCİ ADMIN ANA SAYFA (Firma Listesi) ---
+@login_required
+@root_admin_required
+def admin_home(request):
+    """
+    Root admin için firma listesi ve yönetim sayfası
+    Subdomain-only mod: Bu view sadece admin.fieldops.com'dan erişilmeli
+    """
+    # Admin panelinde tenant olmamalı
+    request.tenant = None
+    
+    tenants = Tenant.objects.filter(is_active=True).order_by('-created_at')
+    
+    context = {
+        'tenants': tenants,
+        'is_admin_panel': True,
+        'tenant': None,
+    }
+    return render(request, 'apps/Core/admin_home.html', context)
+
+# --- FİRMA DÜZENLEME ---
+@login_required
+@root_admin_required
+def edit_tenant(request, tenant_id):
+    """Firma düzenleme sayfası"""
+    tenant = get_object_or_404(Tenant, id=tenant_id)
+    
+    # Menü ayarları için varsayılan değerler (ana menüler ve alt menüler)
+    default_menus = {
+        'hierarchy': True,
+        'users': True,
+        'customers': True,
+        'tasks': True,
+        'route_plan': True,
+        'forms': True,
+        'images': True,
+        'reports': True,
+        # Alt menüler
+        'reports_list': True,  # Raporlar listesi
+        'reports_trash': True,  # Çöp Kutusu
+    }
+    
+    # Mevcut menu_settings yoksa varsayılan değerleri kullan
+    if not tenant.menu_settings or len(tenant.menu_settings) == 0:
+        tenant.menu_settings = default_menus
+        tenant.save(update_fields=['menu_settings'])
+    
+    # Mevcut menu_settings'te eksik olan menüleri ekle (yeni menüler için)
+    menu_settings_updated = tenant.menu_settings.copy()
+    for key, default_value in default_menus.items():
+        if key not in menu_settings_updated:
+            menu_settings_updated[key] = default_value
+    
+    if menu_settings_updated != tenant.menu_settings:
+        tenant.menu_settings = menu_settings_updated
+        tenant.save(update_fields=['menu_settings'])
+    
+    if request.method == 'POST':
+        # İsim güncelleme
+        if 'name' in request.POST:
+            tenant.name = request.POST.get('name', '').strip()
+        
+        # Renk güncelleme
+        if 'primary_color' in request.POST:
+            tenant.primary_color = request.POST.get('primary_color', '#0d6efd')
+        
+        # Logo güncelleme
+        if 'logo' in request.FILES:
+            tenant.logo = request.FILES['logo']
+        
+        # Menü ayarları güncelleme
+        menu_settings = {}
+        for menu_key in default_menus.keys():
+            menu_settings[menu_key] = request.POST.get(f'menu_{menu_key}', 'off') == 'on'
+        
+        # Alt menü kontrolü: Ana menü kapalıysa alt menüler de kapalı olmalı
+        if not menu_settings.get('reports', True):
+            menu_settings['reports_list'] = False
+            menu_settings['reports_trash'] = False
+        
+        tenant.menu_settings = menu_settings
+        
+        # Tenant'ı refresh etmeden önce kaydet
+        tenant.save()
+        
+        # Tenant'ı veritabanından yeniden yükle (cache temizleme için)
+        tenant.refresh_from_db()
+        
+        messages.success(request, f'✅ "{tenant.name}" firması güncellendi.')
+        return redirect('admin_home')
+    
+    # Admin panelinde sidebar rengi değişmemesi için tenant'ı None yap
+    # Ama formda tenant bilgisini gösteriyoruz, o yüzden ayrı değişkende tutalım
+    sidebar_tenant = None  # Admin panelinde sidebar için tenant yok
+    request.tenant = None  # Context processor için
+    
+    # Menü yapısı (ana menüler ve alt menüler)
+    menu_structure = [
+        {
+            'key': 'hierarchy',
+            'label': 'Hiyerarşi',
+            'icon': 'fa-sitemap',
+            'children': []
+        },
+        {
+            'key': 'users',
+            'label': 'Kullanıcılar',
+            'icon': 'fa-users',
+            'children': []
+        },
+        {
+            'key': 'customers',
+            'label': 'Müşteriler',
+            'icon': 'fa-store',
+            'children': []
+        },
+        {
+            'key': 'tasks',
+            'label': 'Görevler',
+            'icon': 'fa-tasks',
+            'children': []
+        },
+        {
+            'key': 'route_plan',
+            'label': 'Rota Planı',
+            'icon': 'fa-route',
+            'children': []
+        },
+        {
+            'key': 'forms',
+            'label': 'Formlar',
+            'icon': 'fa-clipboard-list',
+            'children': []
+        },
+        {
+            'key': 'images',
+            'label': 'Görseller',
+            'icon': 'fa-images',
+            'children': []
+        },
+        {
+            'key': 'reports',
+            'label': 'Raporlar',
+            'icon': 'fa-chart-line',
+            'children': [
+                {'key': 'reports_list', 'label': 'Raporlar Listesi', 'icon': 'fa-list'},
+                {'key': 'reports_trash', 'label': 'Çöp Kutusu', 'icon': 'fa-trash'},
+            ]
+        },
+    ]
+    
+    context = {
+        'tenant': tenant,  # Form için tenant bilgisi
+        'sidebar_tenant': sidebar_tenant,  # Sidebar için None
+        'is_admin_panel': True,  # Admin panelinde olduğumuzu belirt
+        'menu_structure': menu_structure,
+    }
+    return render(request, 'apps/Core/edit_tenant.html', context)
+
+# --- FİRMA EKLEME ---
+@login_required
+def create_company(request):
+    """Yeni firma oluştur - Subdomain otomatik oluşturulur"""
+    if not is_root_admin(request.user):
+        return HttpResponseForbidden("Bu işlem için yetkiniz yok.")
+    
+    if request.method == 'POST':
+        name = request.POST.get('name', '').strip()
+        email = request.POST.get('email', '').strip()
+        primary_color = request.POST.get('primary_color', '#0d6efd')
+        # Slug manuel girilebilir veya otomatik oluşturulur
+        slug_input = request.POST.get('slug', '').strip()
+        
+        if not name:
+            messages.error(request, 'Firma adı gereklidir.')
+            return redirect('admin_home')
+        
+        try:
+            # Slug oluştur (manuel girilmişse onu kullan, yoksa otomatik oluştur)
+            if slug_input:
+                slug = slugify(slug_input)
+            else:
+                slug = slugify(name)
+            
+            # Slug'un boş olmaması için kontrol
+            if not slug:
+                messages.error(request, 'Firma adından geçerli bir subdomain oluşturulamadı. Lütfen manuel olarak girin.')
+                return redirect('admin_home')
+            
+            # Slug benzersiz olmalı - eğer varsa numara ekle
+            original_slug = slug
+            counter = 1
+            while Tenant.objects.filter(slug=slug).exists():
+                slug = f"{original_slug}-{counter}"
+                counter += 1
+                if counter > 100:  # Güvenlik için limit
+                    messages.error(request, 'Çok fazla benzer firma adı var. Lütfen farklı bir ad seçin.')
+                    return redirect('admin_home')
+            
+            # Varsayılan plan oluştur veya al
+            from .models import Plan
+            default_plan, _ = Plan.objects.get_or_create(
+                name="Ücretsiz Plan",
+                defaults={
+                    'plan_type': 'basic',
+                    'price_monthly': 0,
+                    'max_users': 3,
+                    'max_customers': 20,
+                    'max_tasks_per_month': 100,
+                }
+            )
+            
+            tenant = Tenant.objects.create(
+                name=name,
+                slug=slug,
+                email=email or 'info@example.com',
+                plan=default_plan,
+                primary_color=primary_color,
+                is_active=True
+            )
+            
+            # Başarı mesajında subdomain bilgisi de göster
+            messages.success(
+                request, 
+                f'✅ Firma "{name}" başarıyla oluşturuldu! '
+                f'Subdomain: <strong>{slug}.fieldops.com</strong>'
+            )
+        except Exception as e:
+            messages.error(request, f'❌ Hata: {str(e)}')
+    
+    return redirect('admin_home')
+
+# --- FİRMA SEÇME (Subdomain'e Yönlendir) ---
+@login_required
+def select_company(request, tenant_id):
+    """
+    Admin panelinden firma seçimi - Session bazlı olarak direkt o firmanın paneline giriş yapar.
+    Admin yetkisiyle full yönetim erişimi sağlar.
+    """
+    try:
+        tenant = Tenant.objects.get(id=tenant_id, is_active=True)
+        
+        # Kullanıcının bu tenant'a erişim hakkı var mı kontrol et
+        if not is_root_admin(request.user):
+            if hasattr(request.user, 'tenant') and request.user.tenant != tenant:
+                messages.error(request, 'Bu firmaya erişim yetkiniz yok.')
+                return redirect('admin_home')
+        
+        # Admin panelinden bağlanıldığında direkt firma paneline geç
+        # Session'a tenant bilgisini kaydet (admin panelinden bağlanıldığını işaretle)
+        request.session['tenant_id'] = tenant.id
+        request.session['connect_tenant_id'] = tenant.id
+        request.session['connect_tenant_slug'] = tenant.slug
+        request.session['connect_tenant_color'] = tenant.primary_color
+        request.session['connect_tenant_name'] = tenant.name
+        request.session['admin_from_panel'] = True  # Admin panelinden bağlanıldığını işaretle
+        request.session.modified = True  # Session'ın değiştiğini işaretle
+        request.session.save()  # Session'ı kaydet
+        
+        # Admin zaten authenticated, direkt home'a yönlendir
+        messages.success(request, f'"{tenant.name}" firmasına bağlandınız.')
+        from django.urls import reverse
+        # Redirect'i absolute URL ile yap (session'ın korunması için)
+        return redirect(reverse('home'))
+        
+    except Tenant.DoesNotExist:
+        messages.error(request, 'Firma bulunamadı.')
+        return redirect('admin_home')
+
+# --- ÖZEL GİRİŞ VIEW (Firma Adı ile) ---
+from django.contrib.auth.views import LoginView
+from django.contrib.auth import authenticate, login
+from django.views.decorators.csrf import csrf_protect
+from django.utils.decorators import method_decorator
+from django.urls import reverse_lazy
+
+@method_decorator(csrf_protect, name='dispatch')
+class CustomLoginView(LoginView):
+    template_name = 'registration/login_tenant.html'
+    redirect_authenticated_user = False  # Her zaman giriş yapılmasını iste
+    
+    def dispatch(self, request, *args, **kwargs):
+        # Admin panelinden bağlanıldıysa ve session'da tenant varsa direkt geçir
+        # Bu sadece admin panelinden yapılabilir
+        admin_from_panel = request.session.get('admin_from_panel', False)
+        connect_tenant_id = request.session.get('connect_tenant_id')
+        
+        if request.user.is_authenticated and admin_from_panel and connect_tenant_id:
+            # Root admin kontrolü - sadece admin panelinden bağlanıldıysa geçir
+            if is_root_admin(request.user):
+                request.session['tenant_id'] = connect_tenant_id
+                from django.urls import reverse
+                return redirect(reverse('home'))
+        
+        # Normal kullanıcılar için her zaman login yapılması gerekiyor
+        # Admin panelinden değilse, authenticated olsa bile login sayfasını göster
+        return super().dispatch(request, *args, **kwargs)
+    
+    def get(self, request, *args, **kwargs):
+        # redirect_authenticated_user = False olduğu için authenticated kullanıcılar da login sayfasını görebilir
+        # Bu sayede her zaman giriş yapılması zorunlu olur
+        
+        # Tenant bilgisini session'dan al
+        tenant_id = request.session.get('connect_tenant_id')
+        tenant_slug = request.session.get('connect_tenant_slug') or self.kwargs.get('tenant_slug')
+
+        # Eğer tenant bilgisi yoksa, ana sayfayı (index.html) göster
+        # Redirect yapmıyoruz çünkü bu sonsuz döngüye neden oluyor
+        if not tenant_id or not tenant_slug:
+            # Session'ı temizle (eski veriler kalmasın)
+            for key in ['connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel']:
+                request.session.pop(key, None)
+            # Ana sayfa template'ini göster (redirect yerine)
+            return render(request, 'index.html')
+
+        try:
+            tenant = Tenant.objects.get(id=tenant_id, slug=tenant_slug, is_active=True)
+        except Tenant.DoesNotExist:
+            for key in ['connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel']:
+                request.session.pop(key, None)
+            return redirect('index')
+
+        # Logout sonrası gelindi mi kontrol et
+        from_tenant_logout = request.session.get('from_tenant_logout', False)
+        logout_tenant_name = request.session.get('logout_tenant_name', tenant.name)
+
+        context = {
+            'tenant': tenant,
+            'primary_color': request.session.get('connect_tenant_color', tenant.primary_color),
+            'from_tenant_logout': from_tenant_logout,
+            'logout_tenant_name': logout_tenant_name,
+        }
+        return render(request, 'registration/login_tenant.html', context)
+    
+    def post(self, request, *args, **kwargs):
+        username = request.POST.get('username', '').strip()
+        password = request.POST.get('password', '')
+        tenant_id = request.session.get('connect_tenant_id')
+        tenant_slug = request.session.get('connect_tenant_slug') or request.POST.get('tenant_slug', '').strip()
+
+        if not tenant_id or not tenant_slug:
+            messages.error(request, 'Lütfen önce firma adını girin.')
+            return redirect('index')
+
+        try:
+            tenant = Tenant.objects.get(id=tenant_id, slug=tenant_slug, is_active=True)
+        except Tenant.DoesNotExist:
+            messages.error(request, 'Firma bulunamadı. Lütfen tekrar deneyin.')
+            for key in ['connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name']:
+                request.session.pop(key, None)
+            return redirect('index')
+        
+        # Username'i tenant slug ile birleştir (örn: Merch1 -> pastel_Merch1)
+        # Önce direkt username'i dene, sonra tenant slug ile birleştirilmiş halini dene
+        user = None
+        username_attempts = [
+            f"{tenant.slug}_{username}",  # pastel_Merch1
+            username,  # Merch1 (eski kullanıcılar için)
+        ]
+        
+        for username_attempt in username_attempts:
+            user = authenticate(request, username=username_attempt, password=password)
+            if user is not None:
+                break
+        
+        if user is not None and user.is_active:
+            # Root admin kontrolü - root admin her tenant'a giriş yapabilir
+            from apps.users.utils import is_root_admin
+            
+            if not is_root_admin(user):
+                # Normal kullanıcı için MUTLAKA tenant kontrolü
+                # Kullanıcının tenant'ı yoksa giriş yapamaz
+                if not hasattr(user, 'tenant') or not user.tenant:
+                    messages.error(request, 'Bu kullanıcı henüz bir firmaya atanmamış. Lütfen yönetici ile iletişime geçin.')
+                    tenant_slug = request.POST.get('tenant_slug', '').strip()
+                    if tenant_slug:
+                        return redirect('login_with_tenant', tenant_slug=tenant_slug)
+                    return redirect('index')
+                
+                # Kullanıcının tenant'ı seçilen tenant ile eşleşmeli
+                if user.tenant != tenant:
+                    messages.error(request, f'Bu kullanıcı "{user.tenant.name}" firmasına aittir. Lütfen doğru firmayı seçin.')
+                    return self.form_invalid(self.get_form())
+            
+            login(request, user)
+            
+            # Session'a tenant bilgisini kaydet (development'ta subdomain olmadığı için gerekli)
+            request.session['tenant_id'] = tenant.id
+            
+            # Admin panelinden bağlanıldıysa, admin_from_panel flag'ini kaldır
+            if request.session.get('admin_from_panel'):
+                request.session.pop('admin_from_panel', None)
+            
+            # Logout flag'lerini temizle
+            for key in ['from_tenant_logout', 'logout_tenant_slug', 'logout_tenant_name']:
+                request.session.pop(key, None)
+            
+            # Bağlanma session bilgilerini temizle (artık gerekli değil)
+            for key in ['connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name']:
+                request.session.pop(key, None)
+
+            # Development'ta subdomain kullanmıyoruz, direkt home'a yönlendir
+            # Production'da subdomain kullanılabilir
+            if settings.DEBUG:
+                redirect_url = f"/home/"
+            else:
+                domain = getattr(settings, 'SUBDOMAIN_DOMAIN', None)
+                if domain:
+                    protocol = 'https' if not settings.DEBUG else 'http'
+                    redirect_url = f"{protocol}://{tenant.slug}.{domain}/home/"
+                else:
+                    redirect_url = '/home/'
+
+            return redirect(redirect_url)
+
+        messages.error(request, 'Kullanıcı adı veya şifre hatalı.')
+        return self.form_invalid(self.get_form())
+
+# --- GELİŞTİRİCİ ADMIN GİRİŞİ ---
+@method_decorator(csrf_protect, name='dispatch')
+class AdminLoginView(LoginView):
+    template_name = 'registration/admin_login.html'
+    redirect_authenticated_user = False  # Her zaman giriş yapılmasını iste
+    
+    def get_success_url(self):
+        # Root admin kontrolü
+        if is_root_admin(self.request.user):
+            return reverse_lazy('admin_home')
+        return reverse_lazy('home')
 
 # --- MOBİL ANASAYFA ---
 @login_required

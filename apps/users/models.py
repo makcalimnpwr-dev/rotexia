@@ -4,8 +4,28 @@ from django.conf import settings
 
 # 1. DİNAMİK ROL TABLOSU
 class UserRole(models.Model):
-    name = models.CharField(max_length=50, unique=True, verbose_name="Rol Adı")
+    name = models.CharField(max_length=50, verbose_name="Rol Adı")
     description = models.TextField(blank=True, null=True, verbose_name="Açıklama")
+    
+    # Multi-Tenancy: Her rol bir tenant'a ait
+    tenant = models.ForeignKey(
+        'core.Tenant',
+        on_delete=models.CASCADE,
+        verbose_name="Firma",
+        null=True,
+        blank=True,
+        related_name='user_roles'
+    )
+    
+    def save(self, *args, **kwargs):
+        # DEBUG: Tenant kontrolü
+        if not self.tenant_id and not self.pk:
+            # Yeni rol oluşturuluyor ama tenant yok - bu bir hata olabilir
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"UserRole.save: Rol '{self.name}' tenant olmadan kaydediliyor! tenant_id={self.tenant_id}")
+        
+        super().save(*args, **kwargs)
     
     def __str__(self):
         return self.name
@@ -13,6 +33,7 @@ class UserRole(models.Model):
     class Meta:
         verbose_name = "Kullanıcı Rolü"
         verbose_name_plural = "Kullanıcı Rolleri"
+        unique_together = [('name', 'tenant')]  # Aynı tenant içinde benzersiz
 
 # 2. KULLANICI ÖZEL ALAN TANIMLARI (Müşterilerdeki gibi)
 class UserFieldDefinition(models.Model):
@@ -52,7 +73,20 @@ class CustomUser(AbstractUser):
         ('Günlükçü Personel', 'Günlükçü Personel'),
     ]
 
-    user_code = models.CharField(max_length=20, unique=True, verbose_name="Kullanıcı Kodu")
+    # Username'i override et - tenant slug ile birleştirilerek unique olacak
+    # Format: {tenant_slug}_{user_code} (örn: pastel_merch1)
+    username = models.CharField(
+        max_length=150,
+        unique=True,  # Django USERNAME_FIELD gereksinimi için unique olmalı
+        verbose_name="Kullanıcı Adı",
+        help_text="Otomatik oluşturulur: {firma}_{kod}",
+        validators=[AbstractUser.username_validator],
+        error_messages={
+            'unique': "Bu kullanıcı adı zaten kullanılıyor.",
+        },
+    )
+
+    user_code = models.CharField(max_length=20, verbose_name="Kullanıcı Kodu")
     phone = models.CharField(max_length=15, blank=True, null=True, verbose_name="Telefon")
     email = models.EmailField(blank=True, null=True, verbose_name="E-posta")
     
@@ -76,9 +110,33 @@ class CustomUser(AbstractUser):
         default='Saha Ekibi',
         verbose_name="Yetki"
     )
+    
+    # Multi-Tenancy: Her kullanıcı bir tenant'a ait (root admin için null olabilir)
+    tenant = models.ForeignKey(
+        'core.Tenant',
+        on_delete=models.CASCADE,
+        verbose_name="Firma",
+        null=True,
+        blank=True,
+        related_name='users'
+    )
 
     def __str__(self):
         return f"{self.user_code} - {self.first_name} {self.last_name}"
+    
+    class Meta:
+        # Tenant bazında unique: Aynı tenant içinde aynı user_code olamaz
+        # Farklı tenant'larda aynı user_code olabilir
+        # Username otomatik olarak {tenant_slug}_{user_code} formatında oluşturulur (global unique)
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user_code', 'tenant'],
+                name='unique_user_code_per_tenant',
+                condition=models.Q(tenant__isnull=False)  # tenant=None olanlar için çalışmaz
+            ),
+        ]
+        verbose_name = "Kullanıcı"
+        verbose_name_plural = "Kullanıcılar"
 
 
 class AuthorityNode(models.Model):
@@ -96,6 +154,16 @@ class AuthorityNode(models.Model):
         blank=True,
         related_name='assigned_hierarchy_node',
         verbose_name="Atanan Kullanıcı"
+    )
+    
+    # Multi-Tenancy: Her hiyerarşi düğümü bir tenant'a ait
+    tenant = models.ForeignKey(
+        'core.Tenant',
+        on_delete=models.CASCADE,
+        verbose_name="Firma",
+        null=True,
+        blank=True,
+        related_name='authority_nodes'
     )
 
     class Meta:
@@ -125,10 +193,20 @@ class UserMenuPermission(models.Model):
     can_view = models.BooleanField(default=False, verbose_name="Görebilir")
     can_edit = models.BooleanField(default=False, verbose_name="Düzenleyebilir")
     
+    # Multi-Tenancy: Her menü izni bir tenant'a ait
+    tenant = models.ForeignKey(
+        'core.Tenant',
+        on_delete=models.CASCADE,
+        verbose_name="Firma",
+        null=True,
+        blank=True,
+        related_name='menu_permissions'
+    )
+    
     class Meta:
         verbose_name = "Kullanıcı Menü İzni"
         verbose_name_plural = "Kullanıcı Menü İzinleri"
-        unique_together = ['user', 'menu_key']
+        unique_together = ['user', 'menu_key', 'tenant']
         ordering = ['menu_key']
     
     def __str__(self):

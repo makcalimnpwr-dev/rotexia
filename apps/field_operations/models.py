@@ -15,6 +15,16 @@ class RoutePlan(models.Model):
     # Örnek Veri: [1, 8, 15, 22] (Bu günlerde gidilecek)
     active_days = models.JSONField(default=list, verbose_name="Aktif Günler")
     visit_duration = models.IntegerField(default=0, verbose_name="Ziyaret Süresi (Dk)", null=True, blank=True)
+    
+    # Multi-Tenancy: Her rota planı bir tenant'a ait
+    tenant = models.ForeignKey(
+        'core.Tenant',
+        on_delete=models.CASCADE,
+        verbose_name="Firma",
+        null=True,
+        blank=True,
+        related_name='route_plans'
+    )
 
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -58,6 +68,16 @@ class VisitTask(models.Model):
     check_in_time = models.DateTimeField(null=True, blank=True)
     check_out_time = models.DateTimeField(null=True, blank=True)
     visit_note = models.TextField(blank=True, null=True)
+    
+    # Multi-Tenancy: Her görev bir tenant'a ait
+    tenant = models.ForeignKey(
+        'core.Tenant',
+        on_delete=models.CASCADE,
+        verbose_name="Firma",
+        null=True,
+        blank=True,
+        related_name='visit_tasks'
+    )
 
     def __str__(self):
         return f"{self.planned_date} - {self.customer.name}"
@@ -96,6 +116,16 @@ class ReportRecord(models.Model):
     deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     meta = models.JSONField(default=dict, blank=True)
+    
+    # Multi-Tenancy: Her rapor bir tenant'a ait
+    tenant = models.ForeignKey(
+        'core.Tenant',
+        on_delete=models.CASCADE,
+        verbose_name="Firma",
+        null=True,
+        blank=True,
+        related_name='report_records'
+    )
 
     def move_to_trash(self):
         if not self.deleted_at:

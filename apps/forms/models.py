@@ -32,6 +32,16 @@ class Survey(models.Model):
     # (Eski alanlar, veritabanı hatası vermesin diye tutuyoruz ama kullanmıyoruz)
     target_customers = models.ManyToManyField(CustomerCari, blank=True, related_name='old_targets') 
     
+    # Multi-Tenancy: Her anket bir tenant'a ait
+    tenant = models.ForeignKey(
+        'core.Tenant',
+        on_delete=models.CASCADE,
+        verbose_name="Firma",
+        null=True,
+        blank=True,
+        related_name='surveys'
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -97,4 +107,15 @@ class SurveyAnswer(models.Model):
     question = models.ForeignKey(Question, on_delete=models.CASCADE)
     answer_text = models.TextField(blank=True, null=True)
     answer_photo = models.ImageField(upload_to='survey_photos/', blank=True, null=True)
+    
+    # Multi-Tenancy: Her cevap bir tenant'a ait
+    tenant = models.ForeignKey(
+        'core.Tenant',
+        on_delete=models.CASCADE,
+        verbose_name="Firma",
+        null=True,
+        blank=True,
+        related_name='survey_answers'
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rotexia Dashboard</title>
     {% load static %}
+    {% load custom_tags %}
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15,11 +16,86 @@
         html { font-size: 12px; }
         body { background-color: #f4f6f9; font-family: 'Segoe UI', sans-serif; overflow-x: hidden; }
 
-        :root { --sidebar-width: 21rem; }
+        :root { 
+            --sidebar-width: 21rem;
+            {% if is_admin_panel %}
+            --tenant-primary-color: #0d6efd;
+            {% elif tenant %}
+            --tenant-primary-color: {{ tenant.primary_color }};
+            {% else %}
+            --tenant-primary-color: #0d6efd;
+            {% endif %}
+        }
+        
+        /* Sidebar linklerinde tüm focus outline'ları kaldır - yanıp sönmeyi önler */
+        .sidebar a,
+        .sidebar a:focus,
+        .sidebar a:focus-visible,
+        .sidebar a:focus-within,
+        .sidebar a:active,
+        .sidebar a:visited,
+        .sidebar a:focus-visible:active {
+            outline: none !important;
+            outline-offset: 0 !important;
+            -webkit-tap-highlight-color: transparent !important;
+            /* Tüm browser focus ring'lerini kaldır */
+            box-shadow: none !important;
+            -webkit-box-shadow: none !important;
+            -moz-box-shadow: none !important;
+        }
+        
+        /* Bootstrap'in focus ring'ini kaldır */
+        .sidebar a:focus:not(:focus-visible) {
+            outline: none !important;
+            box-shadow: inherit !important;
+        }
+        
+        /* Tarayıcı varsayılan stillerini override et */
+        .sidebar a::-moz-focus-inner {
+            border: 0 !important;
+            outline: none !important;
+        }
+        
+        /* Chrome/Safari focus ring'ini kaldır */
+        .sidebar a::-webkit-focus-ring-color {
+            outline: none !important;
+            background: transparent !important;
+        }
+        
+        /* IE/Edge için */
+        .sidebar a::-ms-focus-ring-color {
+            outline: none !important;
+        }
+        
+        /* Chrome/Safari focus ring'ini kaldır */
+        .sidebar a::-webkit-focus-ring-color {
+            outline: none !important;
+        }
+        
+        /* Tüm browser'lar için focus ring kaldır */
+        .sidebar a:focus-visible {
+            outline: none !important;
+            box-shadow: none !important;
+        }
 
-        .sidebar { height: 100vh; width: var(--sidebar-width); position: fixed; top: 0; left: 0; background-color: #1e1e2d; padding-top: 1.25rem; z-index: 1000; }
+        .sidebar { 
+            height: 100vh; 
+            width: var(--sidebar-width); 
+            position: fixed; 
+            top: 0; 
+            left: 0; 
+            {% if is_admin_panel %}
+            {# Admin panelinde her zaman varsayılan renk #}
+            background-color: #1e1e2d;
+            {% elif tenant %}
+            background-color: {{ tenant.primary_color|default:"#1e1e2d" }};
+            {% else %}
+            background-color: #1e1e2d;
+            {% endif %}
+            padding-top: 1.25rem; 
+            z-index: 1000; 
+        }
         .sidebar-brand {
-            color: #fff;
             font-size: 1.7rem;
             font-weight: 600;
             text-align: left;
@@ -37,9 +113,53 @@
             font-family: 'Poppins', 'Segoe UI', system-ui, -apple-system, Arial, sans-serif;
             line-height: 1;
         }
-        .sidebar a { padding: 1rem 1.5rem; text-decoration: none; font-size: 1.15rem; color: #a4a6b3; display: block; transition: 0.3s; border-left: 3px solid transparent; }
-        .sidebar a:hover { color: #fff; background-color: #2c2c3e; }
-        .sidebar a.active { color: #fff; background-color: #2c2c3e; border-left: 3px solid #dc3545; }
+        .sidebar a { 
+            padding: 1rem 1.5rem; 
+            text-decoration: none !important; 
+            font-size: 1.15rem; 
+            display: block; 
+            /* Transition'ı SADECE hover için kullan, tıklama/focus için YOK */
+            transition: none !important; 
+            border-left: 3px solid transparent;
+            /* Şık çerçeve efekti - her renkte okunabilir */
+            margin: 0.25rem 0.75rem;
+            border-radius: 0.5rem;
+            background: rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            /* Tüm focus/active outline'ları kaldır */
+            outline: none !important;
+            outline-offset: 0 !important;
+            -webkit-tap-highlight-color: transparent !important;
+            -webkit-focus-ring-color: transparent !important;
+            /* Tıklama efektlerini kaldır */
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+        
+        /* Transition SADECE hover için */
+        .sidebar a:hover {
+            transition: background-color 0.2s ease, transform 0.2s ease !important;
+        }
+        /* Tüm focus, active, visited state'lerini override et - TRANSITION YOK */
+        .sidebar a:focus,
+        .sidebar a:focus-visible,
+        .sidebar a:focus-within,
+        .sidebar a:active,
+        .sidebar a:visited,
+        .sidebar a:hover:focus,
+        .sidebar a:hover:active {
+            outline: none !important;
+            outline-offset: 0 !important;
+            box-shadow: inherit !important;
+            -webkit-box-shadow: inherit !important;
+            -moz-box-shadow: inherit !important;
+            /* Tüm state'lerde transition YOK - yanıp sönmeyi önler */
+            transition: none !important;
+        }
         .sidebar i { width: 2rem; text-align: center; margin-right: .75rem; }
         /* Submenu items under collapses (e.g., Raporlar) */
         .sidebar .collapse a {
@@ -56,34 +176,99 @@
 <body>
     <div class="sidebar">
         <div class="sidebar-brand">
-            <span class="brand-text">Rotexia</span>
+            <span class="brand-text">
+                {% if tenant %}
+                    {{ tenant.name }}
+                {% else %}
+                    Rotexia
+                {% endif %}
+            </span>
         </div>
         <a href="{% url 'home' %}"><i class="fas fa-home"></i> Anasayfa</a>
         {% if is_root_admin %}
-          <a href="{% url 'hierarchy' %}"><i class="fas fa-sitemap"></i> Hiyerarşi</a>
-          <a href="{% url 'user_list' %}"><i class="fas fa-users"></i> Kullanıcılar</a>
-        {% endif %}
-        <a href="{% url 'customer_list' %}"><i class="fas fa-store"></i> Müşteriler</a>
-        <a href="{% url 'task_list' %}">
-            <i class="fas fa-tasks"></i> Görevler
-        </a>
-
-        <a href="{% url 'route_plan_list' %}">
-            <i class="fas fa-route"></i> Rota Planı
+            {# Root admin için tüm menüler her zaman açık - geliştirici paneli #}
+            <a href="{% url 'admin_home' %}"><i class="fas fa-shield-alt"></i> Admin Paneli</a>
+            <a href="{% url 'hierarchy' %}?admin_mode=1"><i class="fas fa-sitemap"></i> Hiyerarşi</a>
+            <a href="{% url 'user_list' %}?admin_mode=1"><i class="fas fa-users"></i> Kullanıcılar</a>
+            <a href="{% url 'customer_list' %}?admin_mode=1"><i class="fas fa-store"></i> Müşteriler</a>
+            <a href="{% url 'task_list' %}?admin_mode=1"><i class="fas fa-tasks"></i> Görevler</a>
+            <a href="{% url 'route_plan_list' %}?admin_mode=1"><i class="fas fa-route"></i> Rota Planı</a>
+            <a href="{% url 'survey_list' %}?admin_mode=1"><i class="fas fa-clipboard-check"></i> Formlar</a>
+            <a href="{% url 'visuals_gallery' %}?admin_mode=1"><i class="fas fa-images"></i> Görseller</a>
+            <a href="#reportsMenu" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="reportsMenu">
+                <i class="fas fa-chart-line"></i> Raporlar
+                <span class="float-end" style="opacity:.7;"><i class="fas fa-chevron-down"></i></span>
             </a>
-
-        <a href="{% url 'survey_list' %}">
-            <i class="fas fa-clipboard-check"></i> Formlar
-        </a>
-
-        <a href="{% url 'visuals_gallery' %}">
-            <i class="fas fa-images"></i> Görseller
-        </a>
-            
-        <a href="#reportsMenu" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="reportsMenu">
-            <i class="fas fa-chart-line"></i> Raporlar
-            <span class="float-end" style="opacity:.7;"><i class="fas fa-chevron-down"></i></span>
-        </a>
+        {% else %}
+            {% if tenant %}
+                {% if tenant.menu_settings %}
+                    {# menu_settings varsa ayarlara göre göster/gizle #}
+                    {% with menu=tenant.menu_settings %}
+                        {% if menu|get_item:'hierarchy' != False %}
+                        <a href="{% url 'hierarchy' %}"><i class="fas fa-sitemap"></i> Hiyerarşi</a>
+                        {% endif %}
+                        {% if menu|get_item:'users' != False %}
+                        <a href="{% url 'user_list' %}"><i class="fas fa-users"></i> Kullanıcılar</a>
+                        {% endif %}
+                        {% if menu|get_item:'customers' != False %}
+                        <a href="{% url 'customer_list' %}"><i class="fas fa-store"></i> Müşteriler</a>
+                        {% endif %}
+                        {% if menu|get_item:'tasks' != False %}
+                        <a href="{% url 'task_list' %}">
+                            <i class="fas fa-tasks"></i> Görevler
+                        </a>
+                        {% endif %}
+                        {% if menu|get_item:'route_plan' != False %}
+                        <a href="{% url 'route_plan_list' %}">
+                            <i class="fas fa-route"></i> Rota Planı
+                        </a>
+                        {% endif %}
+                        {% if menu|get_item:'forms' != False %}
+                        <a href="{% url 'survey_list' %}">
+                            <i class="fas fa-clipboard-check"></i> Formlar
+                        </a>
+                        {% endif %}
+                        {% if menu|get_item:'images' != False %}
+                        <a href="{% url 'visuals_gallery' %}">
+                            <i class="fas fa-images"></i> Görseller
+                        </a>
+                        {% endif %}
+                        {% if menu|get_item:'reports' != False %}
+                        <a href="#reportsMenu" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="reportsMenu">
+                            <i class="fas fa-chart-line"></i> Raporlar
+                            <span class="float-end" style="opacity:.7;"><i class="fas fa-chevron-down"></i></span>
+                        </a>
+                        {% endif %}
+                    {% endwith %}
+                {% else %}
+                    {# menu_settings boşsa tüm menüleri göster (varsayılan) #}
+                    <a href="{% url 'hierarchy' %}"><i class="fas fa-sitemap"></i> Hiyerarşi</a>
+                    <a href="{% url 'user_list' %}"><i class="fas fa-users"></i> Kullanıcılar</a>
+                    <a href="{% url 'customer_list' %}"><i class="fas fa-store"></i> Müşteriler</a>
+                    <a href="{% url 'task_list' %}"><i class="fas fa-tasks"></i> Görevler</a>
+                    <a href="{% url 'route_plan_list' %}"><i class="fas fa-route"></i> Rota Planı</a>
+                    <a href="{% url 'survey_list' %}"><i class="fas fa-clipboard-check"></i> Formlar</a>
+                    <a href="{% url 'visuals_gallery' %}"><i class="fas fa-images"></i> Görseller</a>
+                    <a href="#reportsMenu" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="reportsMenu">
+                        <i class="fas fa-chart-line"></i> Raporlar
+                        <span class="float-end" style="opacity:.7;"><i class="fas fa-chevron-down"></i></span>
+                    </a>
+                {% endif %}
+            {% else %}
+                {# Tenant yoksa varsayılan menüleri göster #}
+                <a href="{% url 'customer_list' %}"><i class="fas fa-store"></i> Müşteriler</a>
+                <a href="{% url 'task_list' %}"><i class="fas fa-tasks"></i> Görevler</a>
+                <a href="{% url 'route_plan_list' %}"><i class="fas fa-route"></i> Rota Planı</a>
+                <a href="{% url 'survey_list' %}"><i class="fas fa-clipboard-check"></i> Formlar</a>
+                <a href="{% url 'visuals_gallery' %}"><i class="fas fa-images"></i> Görseller</a>
+                <a href="#reportsMenu" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="reportsMenu">
+                    <i class="fas fa-chart-line"></i> Raporlar
+                    <span class="float-end" style="opacity:.7;"><i class="fas fa-chevron-down"></i></span>
+                </a>
+            {% endif %}
+        {% endif %}
+        {# Reports alt menüsü sadece reports menüsü aktifse göster #}
+        {% if is_root_admin or not tenant %}
         <div class="collapse" id="reportsMenu">
             <a href="{% url 'visit_detail_report' %}">
                 <i class="fas fa-file-alt"></i> Detaylı Ziyaret Raporu
@@ -95,13 +280,33 @@
                 <i class="fas fa-clipboard-list"></i> Anket Raporları
             </a>
         </div>
+        {% elif tenant.menu_settings|get_item:'reports' != False %}
+        <div class="collapse" id="reportsMenu">
+            <a href="{% url 'visit_detail_report' %}">
+                <i class="fas fa-file-alt"></i> Detaylı Ziyaret Raporu
+            </a>
+            <a href="{% url 'daily_visit_summary_report' %}">
+                <i class="fas fa-chart-pie"></i> Günlük Ziyaret Özeti
+            </a>
+            <a href="{% url 'survey_reports_home' %}">
+                <i class="fas fa-clipboard-list"></i> Anket Raporları
+            </a>
+        </div>
+        {% endif %}
         
+        {# Çöp kutusu sadece reports aktifse göster (bir tane olacak şekilde) #}
+        {% if is_root_admin or not tenant or tenant.menu_settings|get_item:'reports' != False %}
         <a href="{% url 'reports_trash' %}">
             <i class="fas fa-trash"></i> Çöp Kutusu
         </a>
+        {% endif %}
         <hr style="border-color: #3f3f50; margin: 20px;">
         {% if is_root_admin %}
-          <a href="{% url 'settings_home' %}"><i class="fas fa-cog"></i> Ayarlar</a>
+          {% if is_admin_panel %}
+            <a href="{% url 'admin_settings' %}"><i class="fas fa-cog"></i> Ayarlar</a>
+          {% else %}
+            <a href="{% url 'settings_home' %}"><i class="fas fa-cog"></i> Ayarlar</a>
+          {% endif %}
         {% endif %}
         <form action="{% url 'logout' %}" method="post" id="logout-form">
             {% csrf_token %}
@@ -113,9 +318,56 @@
 
     <div class="content">
         <div class="top-navbar">
-            <h5 class="m-0 text-secondary">Hoşgeldin, <strong>{{ user.username }}</strong></h5>
-            <div class="user-profile">
-                <img src="https://ui-avatars.com/api/?name={{ user.username }}&background=dc3545&color=fff" class="rounded-circle" width="40">
+            <div class="d-flex align-items-center gap-3">
+                <h5 class="m-0 text-secondary d-flex align-items-center">
+                    {% if is_admin_panel %}
+                        <span><i class="fas fa-shield-alt me-2"></i>Admin Paneli</span>
+                    {% elif tenant %}
+                        {% if tenant.logo %}
+                            <img src="{{ tenant.logo.url }}" alt="{{ tenant.name }}" style="max-width: 32px; max-height: 32px; margin-right: 0.75rem; border-radius: 4px; object-fit: contain;">
+                        {% endif %}
+                        <span style="color: {{ tenant.primary_color }};"><i class="fas fa-building me-2"></i>{{ tenant.name }}</span>
+                    {% else %}
+                        Hoşgeldin, <strong>{{ user.username }}</strong>
+                    {% endif %}
+                </h5>
+                {# Firma değiştir dropdown kaldırıldı - sadece admin panelinden "Bağlan" butonu ile geçiş yapılacak #}
+            </div>
+            
+            <div class="d-flex align-items-center gap-3">
+                {% if is_root_admin and not is_admin_panel and tenant %}
+                    <a href="{% url 'admin_home' %}" class="btn btn-sm btn-outline-secondary">
+                        <i class="fas fa-arrow-left me-1"></i> Admin Paneline Dön
+                    </a>
+                {% endif %}
+                {% if is_root_admin %}
+                <div class="dropdown">
+                    <button class="btn btn-link p-0" type="button" id="adminDropdown" data-bs-toggle="dropdown" aria-expanded="false" style="border: none; background: none;">
+                        <img src="https://ui-avatars.com/api/?name={{ user.username }}&background=dc3545&color=fff" class="rounded-circle" width="40" style="cursor: pointer;">
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="adminDropdown">
+                        <li><h6 class="dropdown-header">{{ user.username }}</h6></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#adminSettingsModal">
+                                <i class="fas fa-cog me-2"></i> Ayarlar
+                            </a>
+                        </li>
+                        <li>
+                            <form action="{% url 'logout' %}" method="post" class="d-inline">
+                                {% csrf_token %}
+                                <button type="submit" class="dropdown-item text-danger">
+                                    <i class="fas fa-sign-out-alt me-2"></i> Çıkış Yap
+                                </button>
+                            </form>
+                        </li>
+                    </ul>
+                </div>
+                {% else %}
+                <div class="user-profile">
+                    <img src="https://ui-avatars.com/api/?name={{ user.username }}&background=dc3545&color=fff" class="rounded-circle" width="40">
+                </div>
+                {% endif %}
             </div>
         </div>
         
@@ -134,5 +386,269 @@
         {% endblock %}
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        // Menü linklerindeki yanıp sönmeyi önle - sadece tıklanan öğe etkilensin
+        document.addEventListener('DOMContentLoaded', function() {
+            const sidebarLinks = document.querySelectorAll('.sidebar a');
+            
+            sidebarLinks.forEach(link => {
+                // Mousedown'da sadece bu link'in transition'ını kaldır
+                link.addEventListener('mousedown', function(e) {
+                    if (e.button === 0) { // Sol tıklama
+                        // Sadece tıklanan link'in transition'ını kaldır
+                        this.style.transition = 'none';
+                        this.style.outline = 'none';
+                        this.style.boxShadow = 'none';
+                    }
+                });
+                
+                // Mouseup'da transition'ı geri getir
+                link.addEventListener('mouseup', function(e) {
+                    // Tıklama bittiğinde transition'ı geri getir (hover için)
+                    setTimeout(() => {
+                        this.style.transition = '';
+                    }, 100);
+                });
+                
+                // Click'te focus'u kaldır
+                link.addEventListener('click', function(e) {
+                    // Focus'u hemen kaldır
+                    this.blur();
+                    // CSS'i zorla uygula
+                    this.style.outline = 'none';
+                    this.style.boxShadow = 'none';
+                    // Transition'ı geri getir (hover efektleri için)
+                    setTimeout(() => {
+                        this.style.transition = '';
+                    }, 50);
+                });
+                
+                // Focus event'ini engelle (sadece mouse ile)
+                link.addEventListener('focus', function(e) {
+                    // Mouse ile tıklama sonrası focus olursa blur yap
+                    setTimeout(() => {
+                        if (document.activeElement === this && !this.matches(':hover')) {
+                            this.blur();
+                        }
+                    }, 10);
+                }, true);
+            });
+        });
+        
+        // Sidebar renk parlaklığına göre metin rengini ayarla
+        (function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+            
+            const bgColor = window.getComputedStyle(sidebar).backgroundColor;
+            
+            // RGB'yi parse et
+            const rgb = bgColor.match(/\d+/g);
+            if (!rgb || rgb.length < 3) return;
+            
+            const r = parseInt(rgb[0]);
+            const g = parseInt(rgb[1]);
+            const b = parseInt(rgb[2]);
+            
+            // Renk parlaklığını hesapla (0-255 arası)
+            // YIQ formülü ile parlaklık hesaplama
+            const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+            
+            // Eğer renk açıksa (parlaklık > 128) siyah metin, koyuysa beyaz metin
+            const isBright = brightness > 128;
+            
+            // Açık renkler için sidebar'a class ekle
+            if (isBright) {
+                sidebar.classList.add('bright');
+            }
+            
+            const textColor = isBright ? '#1a1a1a' : '#ffffff';
+            const inactiveTextColor = isBright ? '#333' : '#a4a6b3';
+            const borderColor = isBright ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.3)';
+            
+            // Brand rengi
+            sidebar.querySelector('.sidebar-brand').style.color = textColor;
+            
+            // Tüm linkler - sadece renkleri ayarla, transition YOK
+            sidebar.querySelectorAll('a').forEach(link => {
+                if (link.classList.contains('active')) {
+                    link.style.color = textColor;
+                } else {
+                    link.style.color = inactiveTextColor;
+                }
+                // Transition'ı kaldır - sadece hover için CSS'te tanımlı
+                link.style.transition = 'none';
+            });
+            
+            // Hover ve active stilleri için CSS değişkenleri
+            sidebar.style.setProperty('--sidebar-text-color', textColor);
+            sidebar.style.setProperty('--sidebar-inactive-color', inactiveTextColor);
+            sidebar.style.setProperty('--sidebar-hover-bg', hoverBg);
+            sidebar.style.setProperty('--sidebar-active-bg', activeBg);
+            sidebar.style.setProperty('--sidebar-border-color', borderColor);
+        })();
+    </script>
+    
+    <style>
+        /* Koyu/tonlu arka planlar için - Beyaz yazı + açık gölge */
+        .sidebar:not(.bright) a {
+            color: #ffffff !important;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.8), 0 0 8px rgba(0, 0, 0, 0.5) !important;
+            background: rgba(255, 255, 255, 0.08) !important;
+            border: 1px solid rgba(255, 255, 255, 0.15) !important;
+            font-weight: 500;
+            outline: none !important;
+        }
+        .sidebar:not(.bright) a:hover {
+            color: #ffffff !important;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9), 0 0 10px rgba(0, 0, 0, 0.6) !important;
+            background: rgba(255, 255, 255, 0.18) !important;
+            border-color: rgba(255, 255, 255, 0.3) !important;
+            transform: translateX(4px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+            font-weight: 600;
+            outline: none !important;
+            /* Hover'da transition VAR */
+            transition: background-color 0.2s ease, transform 0.2s ease !important;
+        }
+        .sidebar:not(.bright) a:focus,
+        .sidebar:not(.bright) a:focus-visible,
+        .sidebar:not(.bright) a:active {
+            outline: none !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25) !important;
+        }
+        .sidebar:not(.bright) a.active {
+            color: #ffffff !important;
+            text-shadow: 2px 2px 5px rgba(0, 0, 0, 1), 0 0 12px rgba(0, 0, 0, 0.7) !important;
+            background: rgba(255, 255, 255, 0.22) !important;
+            border-left: 4px solid rgba(255, 255, 255, 0.9) !important;
+            border-color: rgba(255, 255, 255, 0.35) !important;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+            font-weight: 700;
+            outline: none !important;
+        }
+        .sidebar:not(.bright) .sidebar-brand {
+            color: #ffffff !important;
+            text-shadow: 2px 2px 6px rgba(0, 0, 0, 0.9), 0 0 15px rgba(0, 0, 0, 0.6) !important;
+        }
+        .sidebar:not(.bright) .collapse a {
+            color: #e0e0e0 !important;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.7), 0 0 6px rgba(0, 0, 0, 0.4) !important;
+            background: rgba(255, 255, 255, 0.06) !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            outline: none !important;
+        }
+        .sidebar:not(.bright) .collapse a:focus,
+        .sidebar:not(.bright) .collapse a:focus-visible,
+        .sidebar:not(.bright) .collapse a:active {
+            outline: none !important;
+        }
+        .sidebar:not(.bright) hr {
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+        
+        /* Açık renkler için - Siyah yazı + koyu gölge */
+        .sidebar.bright a {
+            background: rgba(255, 255, 255, 0.25) !important;
+            color: #1a1a1a !important;
+            text-shadow: 1px 1px 3px rgba(255, 255, 255, 0.8), 0 0 8px rgba(255, 255, 255, 0.5), 1px 1px 2px rgba(0, 0, 0, 0.3) !important;
+            border: 1px solid rgba(0, 0, 0, 0.2) !important;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            font-weight: 500;
+            outline: none !important;
+        }
+        .sidebar.bright a:hover {
+            background: rgba(255, 255, 255, 0.4) !important;
+            border-color: rgba(0, 0, 0, 0.3) !important;
+            color: #000000 !important;
+            text-shadow: 2px 2px 4px rgba(255, 255, 255, 1), 0 0 10px rgba(255, 255, 255, 0.6), 1px 1px 3px rgba(0, 0, 0, 0.4) !important;
+            transform: translateX(4px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+            font-weight: 600;
+            outline: none !important;
+            /* Hover'da transition VAR */
+            transition: background-color 0.2s ease, transform 0.2s ease !important;
+        }
+        .sidebar.bright a:focus,
+        .sidebar.bright a:focus-visible,
+        .sidebar.bright a:active {
+            outline: none !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25) !important;
+        }
+        .sidebar.bright a.active {
+            background: rgba(255, 255, 255, 0.5) !important;
+            border-left: 4px solid rgba(0, 0, 0, 0.6) !important;
+            border-color: rgba(0, 0, 0, 0.35) !important;
+            color: #000000 !important;
+            text-shadow: 2px 2px 5px rgba(255, 255, 255, 1), 0 0 12px rgba(255, 255, 255, 0.7), 2px 2px 4px rgba(0, 0, 0, 0.5) !important;
+            font-weight: 700;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+            outline: none !important;
+        }
+        .sidebar.bright .sidebar-brand {
+            color: #1a1a1a !important;
+            text-shadow: 2px 2px 6px rgba(255, 255, 255, 1), 0 0 15px rgba(255, 255, 255, 0.6), 2px 2px 4px rgba(0, 0, 0, 0.4) !important;
+        }
+        .sidebar.bright .collapse a {
+            background: rgba(255, 255, 255, 0.2) !important;
+            color: #2a2a2a !important;
+            text-shadow: 1px 1px 2px rgba(255, 255, 255, 0.8), 0 0 6px rgba(255, 255, 255, 0.5), 1px 1px 2px rgba(0, 0, 0, 0.2) !important;
+            border: 1px solid rgba(0, 0, 0, 0.15) !important;
+            outline: none !important;
+        }
+        .sidebar.bright .collapse a:focus,
+        .sidebar.bright .collapse a:focus-visible,
+        .sidebar.bright .collapse a:active {
+            outline: none !important;
+        }
+        .sidebar.bright hr {
+            border-color: rgba(0, 0, 0, 0.2);
+        }
+    </style>
+
+    <!-- Admin Ayarları Modal -->
+    {% if is_root_admin %}
+    <div class="modal fade" id="adminSettingsModal" tabindex="-1" aria-labelledby="adminSettingsModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="adminSettingsModalLabel">
+                        <i class="fas fa-cog me-2"></i> Admin Ayarları
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form method="post" action="{% url 'admin_update_settings' %}">
+                    {% csrf_token %}
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label for="admin_username" class="form-label fw-bold">Kullanıcı Adı <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="admin_username" name="username" value="{{ user.username }}" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="admin_password" class="form-label fw-bold">Yeni Şifre</label>
+                            <input type="password" class="form-control" id="admin_password" name="password" placeholder="Değiştirmek istemiyorsanız boş bırakın">
+                            <small class="text-muted">Şifre değiştirmezseniz, mevcut şifreniz korunur.</small>
+                        </div>
+                        <div class="mb-3">
+                            <label for="admin_password_confirm" class="form-label fw-bold">Yeni Şifre (Tekrar)</label>
+                            <input type="password" class="form-control" id="admin_password_confirm" name="password_confirm" placeholder="Yeni şifreyi tekrar girin">
+                        </div>
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle me-2"></i>
+                            <strong>Not:</strong> Ayarları kaydettikten sonra sistemden çıkış yapıp yeni bilgilerinizle giriş yapmanız gerekecek.
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i> Kaydet ve Çıkış Yap
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </body>
 </html>

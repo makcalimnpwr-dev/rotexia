@@ -17,13 +17,30 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-change-me-in-production')
 DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
 # Allowed hosts - Production'da mutlaka belirtilmeli
+# Subdomain desteği için wildcard kullanılabilir
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '*').split(',')
 
+# CSRF Trusted Origins - Subdomain'ler için wildcard destek
 CSRF_TRUSTED_ORIGINS = [
     'https://*.ngrok-free.app', 
     'https://*.ngrok-free.dev',
-    'https://lynwood-gateless-emile.ngrok-free.dev' # Garanti olsun diye tam adresi de ekledik
+    'https://lynwood-gateless-emile.ngrok-free.dev', # Garanti olsun diye tam adresi de ekledik
+    'https://*.onrender.com',  # Render wildcard subdomain desteği
 ]
+
+# Subdomain Multi-Tenancy Ayarları
+# Production'da domain belirtilmeli, development'ta None (localhost için)
+SUBDOMAIN_DOMAIN = os.getenv('SUBDOMAIN_DOMAIN', None)  # Örn: 'fieldops.com' veya None
+
+# Session Cookie Domain
+# Production'da: '.fieldops.com' (tüm subdomain'lerde çalışır, ama daha az güvenli)
+# Development'ta: None (her subdomain kendi session'ını kullanır, DAHA GÜVENLİ)
+if SUBDOMAIN_DOMAIN and not DEBUG:
+    SESSION_COOKIE_DOMAIN = f'.{SUBDOMAIN_DOMAIN}'  # Production
+    CSRF_COOKIE_DOMAIN = f'.{SUBDOMAIN_DOMAIN}'  # Production
+else:
+    SESSION_COOKIE_DOMAIN = None  # Development (her subdomain kendi session'ı)
+    CSRF_COOKIE_DOMAIN = None  # Development
 
 # --- TWA (Trusted Web Activity) / Digital Asset Links ---
 # Play Store'a TWA ile çıkmak için Android uygulama paket adı ve SHA256 sertifika fingerprint gerekir.
@@ -78,6 +95,8 @@ TEMPLATES = [
                 'django.contrib.messages.context_processors.messages',
                 # ÖZEL CONTEXT PROCESSOR (Ayarları her sayfaya gömer)
                 'apps.core.context_processors.site_settings',
+                # Tenant context processor
+                'apps.core.context_processors.tenant_context',
                 # Kullanıcı yetki helper'ları (root admin vb.)
                 'apps.users.context_processors.user_permissions',
             ],

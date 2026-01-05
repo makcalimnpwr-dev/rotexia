@@ -328,23 +328,116 @@
             font-size: 14px;
         }
 
-        /* Responsive */
-        @media (max-width: 576px) {
-            .welcome-container {
-                padding: 15px;
+        /* Mobil için basit tasarım */
+        @media (max-width: 768px) {
+            body {
+                background: #f5f7fa;
+                background-size: auto;
+                animation: none;
+            }
+            
+            .bg-particles,
+            .bg-glow,
+            .grid-overlay {
+                display: none;
             }
 
-            .company-form {
-                padding: 36px 28px;
+            .welcome-container {
+                padding: 20px;
+                max-width: 100%;
+            }
+
+            .brand-section {
+                margin-bottom: 32px;
+            }
+
+            .logo-container {
+                gap: 12px;
+                margin-bottom: 16px;
             }
 
             .logo-text {
-                font-size: 42px;
+                font-size: 32px;
+                text-shadow: none;
             }
 
             .logo-rx {
-                width: 80px;
-                height: 80px;
+                width: 60px;
+                height: 60px;
+                animation: none;
+            }
+
+            .tagline {
+                font-size: 14px;
+                margin-top: 8px;
+            }
+
+            .company-form {
+                background: #ffffff;
+                backdrop-filter: none;
+                border-radius: 16px;
+                padding: 32px 24px;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+                animation: none;
+                border: none;
+            }
+
+            .form-title {
+                font-size: 20px;
+                margin-bottom: 6px;
+            }
+
+            .form-subtitle {
+                font-size: 13px;
+                margin-bottom: 24px;
+            }
+
+            .form-control {
+                height: 48px;
+                border-radius: 8px;
+                border: 1px solid #d1d5db;
+                padding-left: 44px;
+                font-size: 16px;
+            }
+
+            .form-control:focus {
+                border-color: #667eea;
+                box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+                transform: none;
+            }
+
+            .input-icon {
+                left: 14px;
+                font-size: 16px;
+                transform: translateY(-50%);
+            }
+
+            .btn-connect {
+                height: 48px;
+                border-radius: 8px;
+                background: #667eea;
+                font-size: 16px;
+                box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+            }
+
+            .btn-connect::before {
+                display: none;
+            }
+
+            .btn-connect:hover {
+                transform: none;
+                box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+            }
+
+            .btn-connect:active {
+                opacity: 0.9;
+                transform: none;
+            }
+
+            .admin-link {
+                margin-top: 24px;
+                padding-top: 20px;
+                font-size: 12px;
             }
         }
     </style>

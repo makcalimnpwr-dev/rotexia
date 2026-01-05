@@ -415,6 +415,16 @@ def index(request):
     
     return render(request, 'index.html')
 
+def _is_mobile_device(request):
+    """Mobil cihaz kontrolü"""
+    # Development'ta test için query parametresi kontrolü
+    if request.GET.get('mobile') == '1':
+        return True
+    
+    user_agent = request.META.get('HTTP_USER_AGENT', '').lower()
+    mobile_keywords = ['mobile', 'android', 'iphone', 'ipad', 'webos', 'ipod']
+    return any(keyword in user_agent for keyword in mobile_keywords)
+
 def company_connect(request):
     """Firma adı girildikten sonra, login sayfasına yönlendir (dropdown ile seçim yapılacak)"""
     if request.method == 'POST':
@@ -424,13 +434,18 @@ def company_connect(request):
             messages.error(request, 'Lütfen firma adı girin.')
             return redirect('index')
         
+        # Mobil cihaz kontrolü
+        is_mobile = _is_mobile_device(request)
+        
         # "Rotexia" veya sistem adı yazıldıysa login sayfasına yönlendir (tenant bilgisi olmadan)
         # Login sayfasında dropdown ile "Geliştirici" veya firma seçilecek
         if company_name.lower() in ['rotexia', 'sistem', 'admin']:
             # Session'ı temizle (tenant bilgisi olmadan login sayfasına git)
             for key in ['connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel']:
                 request.session.pop(key, None)
-            # Login sayfasına yönlendir (tenant bilgisi olmadan, dropdown ile seçim yapılacak)
+            # Mobil ise mobil login'e, değilse normal login'e yönlendir
+            if is_mobile:
+                return redirect('mobile_login')
             return redirect('login')
         
         # Eski mantık: Firma adından tenant'ı bul (geriye dönük uyumluluk için)
@@ -453,7 +468,9 @@ def company_connect(request):
             request.session['connect_tenant_color'] = tenant.primary_color
             request.session['connect_tenant_name'] = tenant.name
             
-            # Login sayfasına yönlendir (CustomLoginView tenant bilgisini session'dan alacak)
+            # Mobil ise mobil login'e, değilse normal login'e yönlendir
+            if is_mobile:
+                return redirect('mobile_login')
             return redirect('login')
             
         except Exception as e:
@@ -721,6 +738,9 @@ from django.contrib.auth import logout as auth_logout
 
 def logout_view(request):
     """Logout - Tenant varsa o tenant'ın login sayfasına yönlendir, root admin ise admin login'e"""
+    # Mobil cihaz kontrolü
+    is_mobile = _is_mobile_device(request)
+    
     # Önce kullanıcının root admin olup olmadığını kontrol et (logout'tan önce)
     is_root_admin_user = False
     if request.user.is_authenticated:
@@ -756,6 +776,9 @@ def logout_view(request):
         # Tüm session'ı temizle (dropdown ile seçim yapılacak)
         for key in ['tenant_id', 'connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel', 'from_tenant_logout', 'logout_tenant_slug', 'logout_tenant_name']:
             request.session.pop(key, None)
+        # Mobil ise mobil login'e, değilse normal login'e yönlendir
+        if is_mobile:
+            return redirect('mobile_login')
         return redirect('login')  # Login sayfasına yönlendir (dropdown ile "Geliştirici" seçilebilir)
     
     # Tenant kullanıcısı çıkışı
@@ -783,7 +806,9 @@ def logout_view(request):
         request.session.pop('tenant_id', None)
         request.session.pop('admin_from_panel', None)
         
-        # Login sayfasına yönlendir (tenant bilgisi session'da)
+        # Mobil ise mobil login'e, değilse normal login'e yönlendir
+        if is_mobile:
+            return redirect('mobile_login')
         return redirect('login')
     else:
         # Tenant yoksa tüm session'ı temizle
@@ -1267,6 +1292,201 @@ from django.contrib.auth import authenticate, login
 from django.views.decorators.csrf import csrf_protect
 from django.utils.decorators import method_decorator
 from django.urls import reverse_lazy
+
+@method_decorator(csrf_protect, name='dispatch')
+class CustomMobileLoginView(LoginView):
+    """Mobil cihazlar için login view - CustomLoginView'a benzer ama mobile_home'a yönlendirir"""
+    template_name = 'mobile/login.html'
+    redirect_authenticated_user = False
+    
+    def get(self, request, *args, **kwargs):
+        # Mobil cihaz kontrolü - eğer mobil değilse normal login'e yönlendir
+        if not _is_mobile_device(request):
+            # Tenant bilgisini session'dan al ve normal login'e yönlendir
+            tenant_id = request.session.get('connect_tenant_id')
+            tenant_slug = request.session.get('connect_tenant_slug')
+            if tenant_id and tenant_slug:
+                return redirect('login')
+            return redirect('index')
+        
+        # Tenant bilgisini session'dan al
+        tenant_id = request.session.get('connect_tenant_id')
+        tenant_slug = request.session.get('connect_tenant_slug')
+        
+        # Eğer tenant bilgisi yoksa ana sayfaya yönlendir
+        if not tenant_id or not tenant_slug:
+            messages.error(request, 'Lütfen önce firma adını girin.')
+            return redirect('mobile_index')
+        
+        try:
+            tenant = Tenant.objects.get(id=tenant_id, slug=tenant_slug, is_active=True)
+        except Tenant.DoesNotExist:
+            for key in ['connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name']:
+                request.session.pop(key, None)
+            messages.error(request, 'Firma bulunamadı. Lütfen tekrar deneyin.')
+            return redirect('mobile_index')
+        
+        context = {
+            'tenant': tenant,
+            'primary_color': request.session.get('connect_tenant_color', tenant.primary_color),
+        }
+        return render(request, 'mobile/login.html', context)
+    
+    def post(self, request, *args, **kwargs):
+        # Mobil cihaz kontrolü - eğer mobil değilse normal login'e yönlendir
+        if not _is_mobile_device(request):
+            # Tenant bilgisini session'dan al ve normal login'e yönlendir
+            tenant_id = request.session.get('connect_tenant_id')
+            tenant_slug = request.session.get('connect_tenant_slug')
+            if tenant_id and tenant_slug:
+                return redirect('login')
+            return redirect('index')
+        
+        username = request.POST.get('username', '').strip()
+        password = request.POST.get('password', '')
+        
+        # Tenant bilgisini session'dan al
+        tenant_id = request.session.get('connect_tenant_id')
+        tenant_slug = request.session.get('connect_tenant_slug')
+        
+        if not tenant_id or not tenant_slug:
+            messages.error(request, 'Lütfen önce firma adını girin.')
+            return redirect('mobile_index')
+        
+        try:
+            tenant = Tenant.objects.get(id=tenant_id, slug=tenant_slug, is_active=True)
+        except Tenant.DoesNotExist:
+            messages.error(request, 'Firma bulunamadı. Lütfen tekrar deneyin.')
+            return redirect('mobile_index')
+        
+        User = get_user_model()
+        root_admin = get_root_admin_user()
+        
+        # Root admin kullanıcı adı ve şifresi ile giriş yapılıyorsa, o firmanın admin kullanıcısına giriş yap
+        if root_admin and username == root_admin.username:
+            if root_admin.check_password(password):
+                # O firmanın admin kullanıcısını bul
+                tenant_admin = User.objects.filter(
+                    tenant=tenant,
+                    user_code='admin',
+                    authority='Admin'
+                ).first()
+                
+                if not tenant_admin:
+                    tenant_admin = User.objects.filter(
+                        username__startswith=f"{tenant.slug}_admin",
+                        tenant=tenant
+                    ).first()
+                
+                if not tenant_admin:
+                    tenant_admin = User.objects.filter(
+                        tenant=tenant,
+                        user_code='admin'
+                    ).first()
+                
+                if tenant_admin:
+                    login(request, tenant_admin, backend='django.contrib.auth.backends.ModelBackend')
+                    request.session['tenant_id'] = tenant.id
+                    request.session['connect_tenant_id'] = tenant.id
+                    request.session['connect_tenant_slug'] = tenant.slug
+                    request.session['connect_tenant_color'] = tenant.primary_color
+                    request.session['connect_tenant_name'] = tenant.name
+                    messages.success(request, f'"{tenant.name}" firmasına başarıyla giriş yaptınız.')
+                    return redirect('mobile_home')
+                else:
+                    # Admin kullanıcısı yoksa otomatik oluştur
+                    admin_username = f"{tenant.slug}_admin"
+                    counter = 1
+                    original_admin_username = admin_username
+                    while User.objects.filter(username=admin_username).exists():
+                        admin_username = f"{original_admin_username}_{counter}"
+                        counter += 1
+                    
+                    tenant_admin = User.objects.create(
+                        username=admin_username,
+                        user_code='admin',
+                        first_name='Admin',
+                        last_name=tenant.name,
+                        email=tenant.email or f'admin@{tenant.slug}.fieldops.com',
+                        tenant=tenant,
+                        authority='Admin',
+                        is_staff=True,
+                        is_active=True
+                    )
+                    tenant_admin.password = root_admin.password
+                    tenant_admin.save(update_fields=['password'])
+                    
+                    admin_role, _ = UserRole.objects.get_or_create(
+                        name='Admin',
+                        tenant=tenant,
+                        defaults={'description': 'Firma yöneticisi'}
+                    )
+                    tenant_admin.role = admin_role
+                    tenant_admin.save(update_fields=['role'])
+                    
+                    login(request, tenant_admin, backend='django.contrib.auth.backends.ModelBackend')
+                    request.session['tenant_id'] = tenant.id
+                    request.session['connect_tenant_id'] = tenant.id
+                    request.session['connect_tenant_slug'] = tenant.slug
+                    request.session['connect_tenant_color'] = tenant.primary_color
+                    request.session['connect_tenant_name'] = tenant.name
+                    messages.success(request, f'"{tenant.name}" firması için admin kullanıcısı otomatik olarak oluşturuldu ve giriş yapıldı.')
+                    return redirect('mobile_home')
+            else:
+                messages.error(request, 'Kullanıcı adı veya şifre hatalı.')
+                return redirect('mobile_login')
+        
+        # Normal kullanıcı girişi
+        user = None
+        username_attempts = [
+            f"{tenant.slug}_{username}",
+            username,
+        ]
+        
+        for username_attempt in username_attempts:
+            user = authenticate(request, username=username_attempt, password=password)
+            if user is not None:
+                break
+        
+        if user is not None and user.is_active:
+            from apps.users.utils import is_root_admin
+            
+            if not is_root_admin(user):
+                if hasattr(user, 'tenant') and user.tenant:
+                    if user.tenant != tenant:
+                        messages.error(request, f'Bu kullanıcı "{user.tenant.name}" firmasına aittir. Lütfen doğru firmayı seçin.')
+                        return redirect('mobile_login')
+                else:
+                    user.tenant = tenant
+                    user.save()
+                    messages.info(request, f'Kullanıcınız "{tenant.name}" firmasına atandı.')
+            
+            login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+            request.session['tenant_id'] = tenant.id
+            request.session['connect_tenant_id'] = tenant.id
+            request.session['connect_tenant_slug'] = tenant.slug
+            request.session['connect_tenant_color'] = tenant.primary_color
+            request.session['connect_tenant_name'] = tenant.name
+            messages.success(request, f'"{tenant.name}" firmasına başarıyla giriş yaptınız.')
+            return redirect('mobile_home')
+        
+        # Kullanıcı bulunamadı
+        user_exists = False
+        for username_attempt in username_attempts:
+            try:
+                potential_user = User.objects.get(username=username_attempt)
+                if potential_user.tenant == tenant or (not hasattr(potential_user, 'tenant') or potential_user.tenant is None):
+                    user_exists = True
+                    break
+            except User.DoesNotExist:
+                continue
+        
+        if user_exists:
+            messages.error(request, 'Şifre hatalı. Lütfen şifrenizi kontrol edin.')
+        else:
+            messages.error(request, 'Kullanıcı adı veya şifre hatalı.')
+        
+        return redirect('mobile_login')
 
 @method_decorator(csrf_protect, name='dispatch')
 class CustomLoginView(LoginView):

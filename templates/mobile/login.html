@@ -1,0 +1,224 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Giriş Yap | {{ tenant.name }} - Rotexia Mobile</title>
+    <meta name="theme-color" content="{{ primary_color|default:'#0d6efd' }}">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: {{ primary_color|default:"#667eea" }};
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #f5f7fa;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .login-container {
+            width: 100%;
+            max-width: 400px;
+        }
+        .login-card {
+            background: #ffffff;
+            border-radius: 16px;
+            padding: 32px 24px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        .company-header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        .company-logo {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            background: var(--primary-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 16px;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .company-logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
+        }
+        .company-name {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1a1a2e;
+            margin-bottom: 4px;
+        }
+        .login-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1a1a2e;
+            margin-bottom: 4px;
+            text-align: center;
+        }
+        .login-subtitle {
+            font-size: 14px;
+            color: #6b7280;
+            margin-bottom: 24px;
+            text-align: center;
+        }
+        .form-label {
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 8px;
+            font-size: 13px;
+            display: block;
+        }
+        .input-wrapper {
+            margin-bottom: 20px;
+        }
+        .form-control {
+            width: 100%;
+            height: 48px;
+            border-radius: 8px;
+            border: 1px solid #d1d5db;
+            padding: 0 16px;
+            font-size: 16px;
+            background: #ffffff;
+            -webkit-appearance: none;
+            appearance: none;
+            box-sizing: border-box;
+        }
+        .form-control:focus {
+            border-color: var(--primary-color);
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        .btn-login {
+            width: 100%;
+            height: 48px;
+            background: var(--primary-color);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-weight: 600;
+            font-size: 16px;
+            margin-top: 8px;
+            cursor: pointer;
+        }
+        .btn-login:active {
+            opacity: 0.9;
+        }
+        .back-link {
+            text-align: center;
+            margin-top: 24px;
+        }
+        .back-link a {
+            color: var(--primary-color);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .back-link a:active {
+            opacity: 0.7;
+        }
+        .alert {
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            padding: 12px;
+        }
+        @media (max-width: 480px) {
+            body {
+                padding: 16px;
+            }
+            .login-card {
+                padding: 24px 20px;
+            }
+            .company-logo {
+                width: 56px;
+                height: 56px;
+                font-size: 20px;
+            }
+            .company-name {
+                font-size: 18px;
+            }
+            .login-title {
+                font-size: 17px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-card">
+            <div class="company-header">
+                <div class="company-logo">
+                    {% if tenant.logo %}
+                        <img src="{{ tenant.logo.url }}" alt="{{ tenant.name }}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">
+                    {% else %}
+                        {{ tenant.name|first|upper }}
+                    {% endif %}
+                </div>
+                <div class="company-name">{{ tenant.name }}</div>
+            </div>
+            
+            <h2 class="login-title">Giriş Yap</h2>
+            <p class="login-subtitle">Hesabınıza erişmek için bilgilerinizi girin</p>
+            
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                        {% if message.tags == 'error' %}
+                            <i class="fas fa-exclamation-circle me-2"></i>
+                        {% else %}
+                            <i class="fas fa-check-circle me-2"></i>
+                        {% endif %}
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+            
+            <form method="post">
+                {% csrf_token %}
+                <div class="input-wrapper">
+                    <label class="form-label" for="username">KULLANICI ADI</label>
+                    <input type="text" id="username" name="username" class="form-control" placeholder="Kullanıcı adınızı girin" required autofocus autocomplete="off">
+                </div>
+                
+                <div class="input-wrapper">
+                    <label class="form-label" for="password">ŞİFRE</label>
+                    <input type="password" id="password" name="password" class="form-control" placeholder="Şifrenizi girin" required autocomplete="new-password">
+                </div>
+                
+                <button type="submit" class="btn-login">Giriş Yap</button>
+            </form>
+            
+            <div class="back-link">
+                <a href="{% url 'index' %}">
+                    <i class="fas fa-arrow-left me-1"></i>Firma Ekranına Dön
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+

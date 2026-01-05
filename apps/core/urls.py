@@ -5,6 +5,7 @@ from apps.core import views as core_views
 urlpatterns = [
     path('', views.index, name='index'),  # Ana sayfa - firma adı girme
     path('connect/', views.company_connect, name='company_connect'),  # Firma bağlanma
+    path('mobile/login/', views.CustomMobileLoginView.as_view(), name='mobile_login'),  # Mobil login
     path('login/<str:tenant_slug>/', views.login_with_tenant, name='login_with_tenant'),  # Firma login sayfası
     path('home/', views.home, name='home'),  # Dashboard (giriş yapıldıktan sonra)
     path('admin-home/', views.admin_home, name='admin_home'),

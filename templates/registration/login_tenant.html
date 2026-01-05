@@ -552,6 +552,35 @@
         if (rgb) {
             document.documentElement.style.setProperty('--primary-color-rgb', rgb.r + ',' + rgb.g + ',' + rgb.b);
         }
+
+        // Mobil görünüm kontrolü - F12'de mobil görünümü test etmek için
+        // Eğer viewport genişliği mobil boyutundaysa, mobil login sayfasına yönlendir
+        function checkMobileViewport() {
+            // Viewport genişliği kontrolü (mobil boyut: < 768px)
+            if (window.innerWidth < 768) {
+                // URL'den path'i al (query parametrelerini koru)
+                var currentPath = window.location.pathname;
+                var searchParams = window.location.search;
+                
+                // Eğer zaten mobile/login değilse yönlendir
+                if (!currentPath.includes('/mobile/login/')) {
+                    // Mobile login URL'ine yönlendir
+                    var mobileLoginUrl = '/mobile/login/' + searchParams;
+                    window.location.href = mobileLoginUrl;
+                    return;
+                }
+            }
+        }
+
+        // Sayfa yüklendiğinde kontrol et
+        checkMobileViewport();
+
+        // Viewport boyutu değiştiğinde de kontrol et (F12'de responsive mod değiştiğinde)
+        var resizeTimer;
+        window.addEventListener('resize', function() {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(checkMobileViewport, 300); // 300ms debounce
+        });
     </script>
 </body>
 </html>

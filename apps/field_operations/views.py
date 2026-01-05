@@ -28,8 +28,10 @@ from apps.core.models import SystemSetting
 from apps.customers.models import Customer, CustomerCari
 from apps.customers.models import CustomFieldDefinition
 from apps.users.hierarchy_access import get_hierarchy_scope_for_user
+from apps.users.decorators import tenant_required
 from apps.core.tenant_utils import filter_by_tenant, set_tenant_on_save, get_current_tenant
 from apps.users.models import AuthorityNode
+from apps.users.utils import is_root_admin
 from apps.core.excel_utils import xlsx_from_rows, xlsx_to_rows
 
 User = get_user_model()
@@ -107,10 +109,24 @@ def _apply_latest_only_per_customer(
 # --- 1. GÖREV LİSTESİ ---
 @login_required
 def task_list(request):
+    # Admin panel kontrolü - Admin panelindeyken tenant kontrolünü atla
+    is_admin_panel_path = (
+        request.path.startswith('/admin-home') or
+        request.path.startswith('/admin/') or
+        request.path.startswith('/admin-panel/') or
+        request.path.startswith('/admin-login') or
+        'admin_mode=1' in request.GET or
+        'admin_mode=1' in request.META.get('QUERY_STRING', '')
+    )
+    
     # NOT: Otomatik oluşturma fonksiyonunu buradan kaldırdık. 
     # Artık sildiğin görevler hortlamayacak.
 
-    tasks = filter_by_tenant(VisitTask.objects.all(), request).select_related('customer', 'visit_type').order_by('planned_date')
+    # Admin panelindeyken tüm görevleri göster (tenant filtresi yok)
+    if is_root_admin(request.user) and is_admin_panel_path:
+        tasks = VisitTask.objects.all().select_related('customer', 'visit_type').order_by('planned_date')
+    else:
+        tasks = filter_by_tenant(VisitTask.objects.all(), request).select_related('customer', 'visit_type').order_by('planned_date')
 
     # Hiyerarşi bazlı yetkilendirme: Admin değilse sadece kendi + altının görevleri
     scope = get_hierarchy_scope_for_user(request.user, include_self=True)
@@ -2300,7 +2316,7 @@ def reports_trash(request):
     purged = _purge_old_deleted_reports(request)
     retention = _get_report_trash_retention_days()
 
-    qs = ReportRecord.objects.filter(deleted_at__isnull=False).order_by("-deleted_at")
+    qs = filter_by_tenant(ReportRecord.objects.filter(deleted_at__isnull=False), request).order_by("-deleted_at")
     rows = []
     now = timezone.now()
     for r in qs:

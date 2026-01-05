@@ -95,3 +95,6 @@ class Command(BaseCommand):
                 self.stdout.write(f'  - ID: {t.id}, İsim: {t.name}')
 
 
+
+
+

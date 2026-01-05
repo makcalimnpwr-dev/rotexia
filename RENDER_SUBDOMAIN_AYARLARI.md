@@ -90,3 +90,6 @@ ALLOWED_HOSTS=fieldops.com,*.fieldops.com
 
 Render'da wildcard subdomain otomatik çalışır! Sadece environment variables'ı eklemeniz yeterli.
 
+
+
+

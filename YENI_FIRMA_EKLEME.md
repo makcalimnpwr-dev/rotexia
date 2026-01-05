@@ -125,3 +125,6 @@ Başarılı ekleme sonrası:
 - **Çözüm:** İkinci firmayı silin veya slug'ını değiştirin
 
 
+
+
+

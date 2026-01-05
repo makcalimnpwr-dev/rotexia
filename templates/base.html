@@ -186,119 +186,170 @@
         </div>
         <a href="{% url 'home' %}"><i class="fas fa-home"></i> Anasayfa</a>
         {% if is_root_admin %}
-            {# Root admin için tüm menüler her zaman açık - geliştirici paneli #}
             <a href="{% url 'admin_home' %}"><i class="fas fa-shield-alt"></i> Admin Paneli</a>
-            <a href="{% url 'hierarchy' %}?admin_mode=1"><i class="fas fa-sitemap"></i> Hiyerarşi</a>
-            <a href="{% url 'user_list' %}?admin_mode=1"><i class="fas fa-users"></i> Kullanıcılar</a>
-            <a href="{% url 'customer_list' %}?admin_mode=1"><i class="fas fa-store"></i> Müşteriler</a>
-            <a href="{% url 'task_list' %}?admin_mode=1"><i class="fas fa-tasks"></i> Görevler</a>
-            <a href="{% url 'route_plan_list' %}?admin_mode=1"><i class="fas fa-route"></i> Rota Planı</a>
-            <a href="{% url 'survey_list' %}?admin_mode=1"><i class="fas fa-clipboard-check"></i> Formlar</a>
-            <a href="{% url 'visuals_gallery' %}?admin_mode=1"><i class="fas fa-images"></i> Görseller</a>
+            
+            {# Root admin her zaman tüm menüleri görür #}
+            <a href="{% url 'hierarchy' %}"><i class="fas fa-sitemap"></i> Hiyerarşi</a>
+            <a href="{% url 'user_list' %}"><i class="fas fa-users"></i> Kullanıcılar</a>
+            <a href="{% url 'customer_list' %}"><i class="fas fa-store"></i> Müşteriler</a>
+            <a href="{% url 'task_list' %}"><i class="fas fa-tasks"></i> Görevler</a>
+            <a href="{% url 'route_plan_list' %}"><i class="fas fa-route"></i> Rota Planı</a>
+            <a href="{% url 'survey_list' %}"><i class="fas fa-clipboard-check"></i> Formlar</a>
+            <a href="{% url 'visuals_gallery' %}"><i class="fas fa-images"></i> Görseller</a>
             <a href="#reportsMenu" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="reportsMenu">
                 <i class="fas fa-chart-line"></i> Raporlar
                 <span class="float-end" style="opacity:.7;"><i class="fas fa-chevron-down"></i></span>
             </a>
+            
+        {% elif is_tenant_admin %}
+            {# Firma admin kullanıcıları için tüm menüleri göster (hiçbir kısıtlama yok) #}
+            <a href="{% url 'hierarchy' %}"><i class="fas fa-sitemap"></i> Hiyerarşi</a>
+            <a href="{% url 'user_list' %}"><i class="fas fa-users"></i> Kullanıcılar</a>
+            <a href="{% url 'customer_list' %}"><i class="fas fa-store"></i> Müşteriler</a>
+            <a href="{% url 'task_list' %}"><i class="fas fa-tasks"></i> Görevler</a>
+            <a href="{% url 'route_plan_list' %}"><i class="fas fa-route"></i> Rota Planı</a>
+            <a href="{% url 'survey_list' %}"><i class="fas fa-clipboard-check"></i> Formlar</a>
+            <a href="{% url 'visuals_gallery' %}"><i class="fas fa-images"></i> Görseller</a>
+            <a href="#reportsMenu" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="reportsMenu">
+                <i class="fas fa-chart-line"></i> Raporlar
+                <span class="float-end" style="opacity:.7;"><i class="fas fa-chevron-down"></i></span>
+            </a>
+            
         {% else %}
             {% if tenant %}
                 {% if tenant.menu_settings %}
                     {# menu_settings varsa ayarlara göre göster/gizle #}
                     {% with menu=tenant.menu_settings %}
-                        {% if menu|get_item:'hierarchy' != False %}
+                        {% with enabled=menu|get_item:'hierarchy' %}
+                        {% if enabled != False and user_menu_perms|get_item:'hierarchy' %}
                         <a href="{% url 'hierarchy' %}"><i class="fas fa-sitemap"></i> Hiyerarşi</a>
                         {% endif %}
-                        {% if menu|get_item:'users' != False %}
+                        {% endwith %}
+
+                        {% with enabled=menu|get_item:'users' %}
+                        {% if enabled != False and user_menu_perms|get_item:'users' %}
                         <a href="{% url 'user_list' %}"><i class="fas fa-users"></i> Kullanıcılar</a>
                         {% endif %}
-                        {% if menu|get_item:'customers' != False %}
+                        {% endwith %}
+
+                        {% with enabled=menu|get_item:'customers' %}
+                        {% if enabled != False and user_menu_perms|get_item:'customers' %}
                         <a href="{% url 'customer_list' %}"><i class="fas fa-store"></i> Müşteriler</a>
                         {% endif %}
-                        {% if menu|get_item:'tasks' != False %}
-                        <a href="{% url 'task_list' %}">
-                            <i class="fas fa-tasks"></i> Görevler
-                        </a>
+                        {% endwith %}
+
+                        {% with enabled=menu|get_item:'tasks' %}
+                        {% if enabled != False and user_menu_perms|get_item:'tasks' %}
+                        <a href="{% url 'task_list' %}"><i class="fas fa-tasks"></i> Görevler</a>
                         {% endif %}
-                        {% if menu|get_item:'route_plan' != False %}
-                        <a href="{% url 'route_plan_list' %}">
-                            <i class="fas fa-route"></i> Rota Planı
-                        </a>
+                        {% endwith %}
+
+                        {% with enabled=menu|get_item:'route_plan' %}
+                        {% if enabled != False and user_menu_perms|get_item:'route_plan' %}
+                        <a href="{% url 'route_plan_list' %}"><i class="fas fa-route"></i> Rota Planı</a>
                         {% endif %}
-                        {% if menu|get_item:'forms' != False %}
-                        <a href="{% url 'survey_list' %}">
-                            <i class="fas fa-clipboard-check"></i> Formlar
-                        </a>
+                        {% endwith %}
+
+                        {% with enabled=menu|get_item:'forms' %}
+                        {% if enabled != False and user_menu_perms|get_item:'forms' %}
+                        <a href="{% url 'survey_list' %}"><i class="fas fa-clipboard-check"></i> Formlar</a>
                         {% endif %}
-                        {% if menu|get_item:'images' != False %}
-                        <a href="{% url 'visuals_gallery' %}">
-                            <i class="fas fa-images"></i> Görseller
-                        </a>
+                        {% endwith %}
+
+                        {% with enabled=menu|get_item:'images' %}
+                        {% if enabled != False and user_menu_perms|get_item:'images' %}
+                        <a href="{% url 'visuals_gallery' %}"><i class="fas fa-images"></i> Görseller</a>
                         {% endif %}
-                        {% if menu|get_item:'reports' != False %}
+                        {% endwith %}
+
+                        {% with enabled=menu|get_item:'reports' %}
+                        {% if enabled != False and user_menu_perms|get_item:'reports' %}
                         <a href="#reportsMenu" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="reportsMenu">
                             <i class="fas fa-chart-line"></i> Raporlar
                             <span class="float-end" style="opacity:.7;"><i class="fas fa-chevron-down"></i></span>
                         </a>
                         {% endif %}
+                        {% endwith %}
                     {% endwith %}
                 {% else %}
-                    {# menu_settings boşsa tüm menüleri göster (varsayılan) #}
+                    {# menu_settings boşsa tüm menüleri göster (varsayılan) ama yine de kullanıcı iznine bak #}
+                    {% if user_menu_perms|get_item:'hierarchy' %}
                     <a href="{% url 'hierarchy' %}"><i class="fas fa-sitemap"></i> Hiyerarşi</a>
+                    {% endif %}
+                    {% if user_menu_perms|get_item:'users' %}
                     <a href="{% url 'user_list' %}"><i class="fas fa-users"></i> Kullanıcılar</a>
+                    {% endif %}
+                    {% if user_menu_perms|get_item:'customers' %}
                     <a href="{% url 'customer_list' %}"><i class="fas fa-store"></i> Müşteriler</a>
+                    {% endif %}
+                    {% if user_menu_perms|get_item:'tasks' %}
                     <a href="{% url 'task_list' %}"><i class="fas fa-tasks"></i> Görevler</a>
+                    {% endif %}
+                    {% if user_menu_perms|get_item:'route_plan' %}
                     <a href="{% url 'route_plan_list' %}"><i class="fas fa-route"></i> Rota Planı</a>
+                    {% endif %}
+                    {% if user_menu_perms|get_item:'forms' %}
                     <a href="{% url 'survey_list' %}"><i class="fas fa-clipboard-check"></i> Formlar</a>
+                    {% endif %}
+                    {% if user_menu_perms|get_item:'images' %}
                     <a href="{% url 'visuals_gallery' %}"><i class="fas fa-images"></i> Görseller</a>
+                    {% endif %}
+                    {% if user_menu_perms|get_item:'reports' %}
                     <a href="#reportsMenu" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="reportsMenu">
                         <i class="fas fa-chart-line"></i> Raporlar
                         <span class="float-end" style="opacity:.7;"><i class="fas fa-chevron-down"></i></span>
                     </a>
+                    {% endif %}
                 {% endif %}
             {% else %}
-                {# Tenant yoksa varsayılan menüleri göster #}
-                <a href="{% url 'customer_list' %}"><i class="fas fa-store"></i> Müşteriler</a>
-                <a href="{% url 'task_list' %}"><i class="fas fa-tasks"></i> Görevler</a>
-                <a href="{% url 'route_plan_list' %}"><i class="fas fa-route"></i> Rota Planı</a>
-                <a href="{% url 'survey_list' %}"><i class="fas fa-clipboard-check"></i> Formlar</a>
-                <a href="{% url 'visuals_gallery' %}"><i class="fas fa-images"></i> Görseller</a>
-                <a href="#reportsMenu" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="reportsMenu">
-                    <i class="fas fa-chart-line"></i> Raporlar
-                    <span class="float-end" style="opacity:.7;"><i class="fas fa-chevron-down"></i></span>
-                </a>
+                {# Tenant yoksa varsayılan menüleri göster (AMA YETKİ KONTROLÜ İLE) #}
+                {# Bu blok aslında Tenant yoksa çalışıyor, ama Tenant yoksa user_menu_perms de boş gelebilir. #}
+                {# Normalde tenant olmadan login olunmaz ama admin panelinden çıkınca buraya düşebilir #}
+                {# Tenant yoksa menü gösterme, zaten Admin Paneli linki yukarıda var #}
             {% endif %}
         {% endif %}
-        {# Reports alt menüsü sadece reports menüsü aktifse göster #}
-        {% if is_root_admin or not tenant %}
-        <div class="collapse" id="reportsMenu">
-            <a href="{% url 'visit_detail_report' %}">
-                <i class="fas fa-file-alt"></i> Detaylı Ziyaret Raporu
-            </a>
-            <a href="{% url 'daily_visit_summary_report' %}">
-                <i class="fas fa-chart-pie"></i> Günlük Ziyaret Özeti
-            </a>
-            <a href="{% url 'survey_reports_home' %}">
-                <i class="fas fa-clipboard-list"></i> Anket Raporları
-            </a>
-        </div>
-        {% elif tenant.menu_settings|get_item:'reports' != False %}
-        <div class="collapse" id="reportsMenu">
-            <a href="{% url 'visit_detail_report' %}">
-                <i class="fas fa-file-alt"></i> Detaylı Ziyaret Raporu
-            </a>
-            <a href="{% url 'daily_visit_summary_report' %}">
-                <i class="fas fa-chart-pie"></i> Günlük Ziyaret Özeti
-            </a>
-            <a href="{% url 'survey_reports_home' %}">
-                <i class="fas fa-clipboard-list"></i> Anket Raporları
-            </a>
-        </div>
-        {% endif %}
-        
-        {# Çöp kutusu sadece reports aktifse göster (bir tane olacak şekilde) #}
-        {% if is_root_admin or not tenant or tenant.menu_settings|get_item:'reports' != False %}
-        <a href="{% url 'reports_trash' %}">
-            <i class="fas fa-trash"></i> Çöp Kutusu
-        </a>
+        {# Reports alt menüsü ve Çöp Kutusu #}
+        {% if is_root_admin or is_tenant_admin or tenant %}
+            {% with reports_enabled=tenant.menu_settings|get_item:'reports' %}
+                {% with user_has_report_perm=user_menu_perms|get_item:'reports' %}
+                {# Complex logic breakdown for Django template compatibility #}
+                {# Show if: is_root_admin OR (reports are enabled AND user has permission) #}
+                {# We handle 'reports_enabled != False' to default to True if setting is missing #}
+                
+                {% if is_root_admin %}
+                    <div class="collapse" id="reportsMenu">
+                        <a href="{% url 'visit_detail_report' %}">
+                            <i class="fas fa-file-alt"></i> Detaylı Ziyaret Raporu
+                        </a>
+                        <a href="{% url 'daily_visit_summary_report' %}">
+                            <i class="fas fa-chart-pie"></i> Günlük Ziyaret Özeti
+                        </a>
+                        <a href="{% url 'survey_reports_home' %}">
+                            <i class="fas fa-clipboard-list"></i> Anket Raporları
+                        </a>
+                    </div>
+                    <a href="{% url 'reports_trash' %}">
+                        <i class="fas fa-trash"></i> Çöp Kutusu
+                    </a>
+                {% elif reports_enabled != False and user_has_report_perm %}
+                    <div class="collapse" id="reportsMenu">
+                        <a href="{% url 'visit_detail_report' %}">
+                            <i class="fas fa-file-alt"></i> Detaylı Ziyaret Raporu
+                        </a>
+                        <a href="{% url 'daily_visit_summary_report' %}">
+                            <i class="fas fa-chart-pie"></i> Günlük Ziyaret Özeti
+                        </a>
+                        <a href="{% url 'survey_reports_home' %}">
+                            <i class="fas fa-clipboard-list"></i> Anket Raporları
+                        </a>
+                    </div>
+                    <a href="{% url 'reports_trash' %}">
+                        <i class="fas fa-trash"></i> Çöp Kutusu
+                    </a>
+                {% endif %}
+                
+                {% endwith %}
+            {% endwith %}
         {% endif %}
         <hr style="border-color: #3f3f50; margin: 20px;">
         {% if is_root_admin %}
@@ -364,8 +415,12 @@
                     </ul>
                 </div>
                 {% else %}
-                <div class="user-profile">
-                    <img src="https://ui-avatars.com/api/?name={{ user.username }}&background=dc3545&color=fff" class="rounded-circle" width="40">
+                <div class="user-profile d-flex align-items-center gap-2">
+                    <div class="text-end d-none d-md-block" style="line-height: 1.2;">
+                        <div class="fw-bold text-dark" style="font-size: 0.9rem;">{{ user.first_name }} {{ user.last_name }}</div>
+                        <div class="small text-muted" style="font-size: 0.75rem;">{{ user.user_code|default:user.username }}</div>
+                    </div>
+                    <img src="https://ui-avatars.com/api/?name={{ user.first_name|default:user.username }}+{{ user.last_name|default:'' }}&background={{ tenant.primary_color|default:'#dc3545'|slice:'1:' }}&color=fff&size=128" class="rounded-circle" width="40" height="40" style="object-fit: cover;">
                 </div>
                 {% endif %}
             </div>

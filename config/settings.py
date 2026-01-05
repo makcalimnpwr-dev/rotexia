@@ -60,7 +60,7 @@ INSTALLED_APPS = [
     
     # Buraya ekleyin:
     'apps.core', 
-    'apps.users',
+    'apps.users.apps.UsersConfig',  # Signal'lar için apps.py kullan
     'apps.customers',
     'apps.field_operations',
     'apps.forms',

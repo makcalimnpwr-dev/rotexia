@@ -4,7 +4,7 @@ from django.contrib.auth.decorators import login_required
 from .models import CustomUser, UserRole, UserFieldDefinition, AuthorityNode, UserMenuPermission
 from apps.forms.models import Survey
 from .forms import UserCreationForm, UserEditForm, RoleForm
-from .decorators import root_admin_required
+from .decorators import root_admin_required, tenant_required
 from .utils import ensure_root_admin_configured, get_admin_node, get_root_admin_user, is_root_admin
 from django.contrib import messages
 from django.db.models import Q
@@ -70,16 +70,27 @@ def role_delete(request, pk):
     return redirect('role_list')
 
 # --- MEVCUT KULLANICI LİSTELEME ---
-# apps/users/views.py içindeki user_list fonksiyonu:
-
-# apps/users/views.py dosyasında user_list fonksiyonu:
-
 @login_required
 def user_list(request):
-    users = filter_by_tenant(CustomUser.objects.all(), request).order_by('-date_joined')
+    # Admin panel kontrolü - Admin panelindeyken tenant kontrolünü atla
+    is_admin_panel_path = (
+        request.path.startswith('/admin-home') or
+        request.path.startswith('/admin/') or
+        request.path.startswith('/admin-panel/') or
+        request.path.startswith('/admin-login') or
+        'admin_mode=1' in request.GET or
+        'admin_mode=1' in request.META.get('QUERY_STRING', '')
+    )
     
-    # BU SATIR SAYESİNDE FİLTRE KUTUSU HER ZAMAN GÜNCEL OLUR
-    roles = filter_by_tenant(UserRole.objects.all(), request) 
+    # Admin panelindeyken tüm kullanıcıları göster (tenant filtresi yok)
+    if is_root_admin(request.user) and is_admin_panel_path:
+        users = CustomUser.objects.all().order_by('-date_joined')
+        roles = UserRole.objects.all()
+    else:
+        # Normal mod: tenant filtresi uygula
+        users = filter_by_tenant(CustomUser.objects.all(), request).order_by('-date_joined')
+        # BU SATIR SAYESİNDE FİLTRE KUTUSU HER ZAMAN GÜNCEL OLUR
+        roles = filter_by_tenant(UserRole.objects.all(), request) 
 
     # ... filtreleme kodları (search, role_filter vb.) ...
     search_query = request.GET.get('search', '')
@@ -424,18 +435,31 @@ def import_users(request):
 # --- HİYERARŞİ ---
 @login_required
 def hierarchy(request):
-    # Tenant kontrolü
-    tenant = get_current_tenant(request)
-    if not tenant:
-        messages.error(request, "Firma seçimi yapılmamış.")
-        return redirect('home')
+    # Admin panel kontrolü - Admin panelindeyken tenant kontrolünü atla
+    is_admin_panel_path = (
+        request.path.startswith('/admin-home') or
+        request.path.startswith('/admin/') or
+        request.path.startswith('/admin-panel/') or
+        request.path.startswith('/admin-login') or
+        'admin_mode=1' in request.GET or
+        'admin_mode=1' in request.META.get('QUERY_STRING', '')
+    )
     
     # Root admin kontrolü - sadece root admin yeni düğüm oluşturabilir
     ensure_root_admin_configured(request.user)
     is_root = is_root_admin(request.user)
     
-    # Tenant'a göre filtrele
-    qs = filter_by_tenant(AuthorityNode.objects.select_related('assigned_user'), request).order_by('sort_order', 'id')
+    # Admin panelindeyken tüm düğümleri göster (tenant filtresi yok)
+    if is_root and is_admin_panel_path:
+        qs = AuthorityNode.objects.select_related('assigned_user').order_by('sort_order', 'id')
+        tenant = None  # Admin panelindeyken tenant yok
+    else:
+        # Normal mod: tenant kontrolü yap
+        tenant = get_current_tenant(request)
+        if not tenant and not is_root:
+            messages.error(request, 'Firma seçimi yapılmamış!')
+            return redirect('home')
+        qs = filter_by_tenant(AuthorityNode.objects.select_related('assigned_user'), request).order_by('sort_order', 'id')
     all_nodes = list(qs.values(
         'id', 'authority', 'parent_id', 'sort_order', 'label',
         'assigned_user_id', 'assigned_user__first_name', 'assigned_user__last_name', 'assigned_user__user_code'
@@ -786,7 +810,7 @@ def hierarchy_get_menu_permissions(request):
 @require_POST
 @root_admin_required
 def hierarchy_save_menu_permissions(request):
-    """Kullanıcının menü izinlerini kaydet"""
+    """Kullanıcının menü izinlerini kaydet (Tenant bazlı)"""
     try:
         data = json.loads(request.body.decode('utf-8'))
         user_id = data.get('user_id')
@@ -795,15 +819,22 @@ def hierarchy_save_menu_permissions(request):
         if not user_id:
             return JsonResponse({'success': False, 'message': 'user_id gerekli'}, status=400)
         
-        user = CustomUser.objects.get(pk=user_id)
+        # Tenant kontrolü
+        tenant = get_current_tenant(request)
+        if not tenant:
+             return JsonResponse({'success': False, 'message': 'Firma seçimi yapılmamış'}, status=400)
+
+        # Kullanıcıyı bul (tenant filtresiyle)
+        user = get_object_or_404(filter_by_tenant(CustomUser.objects.all(), request), pk=user_id)
         
-        # Mevcut izinleri sil
-        UserMenuPermission.objects.filter(user=user).delete()
+        # Mevcut izinleri sil (Sadece bu tenant için)
+        UserMenuPermission.objects.filter(user=user, tenant=tenant).delete()
         
         # Yeni izinleri kaydet
         for menu_key, perm_data in permissions.items():
             UserMenuPermission.objects.create(
                 user=user,
+                tenant=tenant,
                 menu_key=menu_key,
                 menu_label=perm_data.get('menu_label', menu_key),
                 can_view=perm_data.get('can_view', False),

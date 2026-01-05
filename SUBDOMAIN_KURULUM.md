@@ -179,3 +179,6 @@ for t in tenants:
 4. Yeni tenant eklerken slug'ları subdomain ile eşleştirmeyi unutmayın
 
 
+
+
+

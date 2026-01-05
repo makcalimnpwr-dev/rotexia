@@ -139,3 +139,6 @@ Site URL'iniz: `https://rotexia.onrender.com` (veya Render'ın verdiği URL)
 
 
 
+
+
+

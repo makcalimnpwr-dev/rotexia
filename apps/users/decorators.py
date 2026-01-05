@@ -29,3 +29,19 @@ def root_admin_required(view_func):
     return _wrapped
 
 
+def tenant_required(view_func):
+    """
+    Bu decorator, view'a erişim için aktif bir tenant gerektirir.
+    Şimdilik kullanılmıyor - middleware tenant yükleme işini yapıyor.
+    """
+
+    @wraps(view_func)
+    def _wrapped(request, *args, **kwargs):
+        # Şimdilik sadece login_required gibi davran
+        if not request.user.is_authenticated:
+            return redirect("login")
+        return view_func(request, *args, **kwargs)
+
+    return _wrapped
+
+

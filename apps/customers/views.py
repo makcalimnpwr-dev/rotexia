@@ -10,10 +10,22 @@ from apps.users.hierarchy_access import get_hierarchy_scope_for_user
 from django.db.models import Q as DQ
 from apps.core.excel_utils import xlsx_from_rows, xlsx_to_rows
 from apps.core.tenant_utils import filter_by_tenant, set_tenant_on_save, get_current_tenant
+from apps.users.utils import is_root_admin
+from apps.users.decorators import tenant_required
 
 # --- LİSTE VE SAYFALAMA ---
 @login_required
 def customer_list(request):
+    # Admin panel kontrolü - Admin panelindeyken tenant kontrolünü atla
+    is_admin_panel_path = (
+        request.path.startswith('/admin-home') or
+        request.path.startswith('/admin/') or
+        request.path.startswith('/admin-panel/') or
+        request.path.startswith('/admin-login') or
+        'admin_mode=1' in request.GET or
+        'admin_mode=1' in request.META.get('QUERY_STRING', '')
+    )
+    
     # 1. SIRALAMA (Mevcut Mantık)
     sort_by = request.GET.get('sort', '-created_at')
     direction = request.GET.get('dir', 'desc')
@@ -23,7 +35,11 @@ def customer_list(request):
     if direction == 'desc' and not db_sort_field.startswith('-'): db_sort_field = f'-{db_sort_field}'
     
     # 2. TEMEL SORGULAR
-    customer_qs = filter_by_tenant(Customer.objects.all(), request).order_by(db_sort_field)
+    # Admin panelindeyken tüm müşterileri göster (tenant filtresi yok)
+    if is_root_admin(request.user) and is_admin_panel_path:
+        customer_qs = Customer.objects.all().order_by(db_sort_field)
+    else:
+        customer_qs = filter_by_tenant(Customer.objects.all(), request).order_by(db_sort_field)
 
     # Hiyerarşi bazlı filtre: Admin değilse sadece kendi/altının müşteri havuzu
     scope = get_hierarchy_scope_for_user(request.user, include_self=True)

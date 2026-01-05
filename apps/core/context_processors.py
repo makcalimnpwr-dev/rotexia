@@ -16,14 +16,23 @@ def tenant_context(request):
     tenant = getattr(request, 'tenant', None)
     
     # Development modunda subdomain yoksa session'dan tenant al
-    if not tenant and request.user.is_authenticated:
+    # ANCAK admin panelindeyken tenant yüklenmemeli
+    is_admin_panel_path = (
+        request.path.startswith('/admin-home') or
+        request.path.startswith('/admin/') or
+        request.path.startswith('/admin-panel/') or
+        request.path.startswith('/admin-login') or
+        'admin_mode=1' in request.GET or
+        'admin_mode=1' in request.META.get('QUERY_STRING', '')
+    )
+    
+    if not tenant and request.user.is_authenticated and not is_admin_panel_path:
         host = request.get_host()
         host_without_port = host.split(':')[0] if ':' in host else host
         
         # 127.0.0.1 veya localhost ise session'dan tenant al
         if host_without_port in ['127.0.0.1', 'localhost']:
             tenant_id = request.session.get('tenant_id') or request.session.get('connect_tenant_id')
-            admin_from_panel = request.session.get('admin_from_panel', False)
             
             # Admin panelinden bağlanıldıysa veya normal session varsa tenant'ı al
             if tenant_id:
@@ -47,9 +56,25 @@ def tenant_context(request):
         parts = host_without_port.split('.')
         subdomain = parts[0].lower()
         is_admin_panel = (subdomain == 'admin')
+    elif is_admin_panel_path:
+        # Admin panel path'inde ise admin panelindeyiz
+        is_admin_panel = True
+        # Admin panelindeyken tenant olmamalı - Session'daki tenant bilgilerini temizle
+        tenant = None
+        request.tenant = None
+        # Admin panelindeyken her zaman tenant session bilgilerini temizle
+        for key in ['tenant_id', 'connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel']:
+            request.session.pop(key, None)
     else:
-        # Subdomain yok ve tenant yoksa admin panelinde olabiliriz
-        is_admin_panel = (tenant is None)
+        # Subdomain yok ve admin panel path'i değilse
+        # Eğer root admin ise ve tenant yoksa admin panelinde olabilir
+        if request.user.is_authenticated:
+            try:
+                from apps.users.utils import is_root_admin
+                if is_root_admin(request.user) and tenant is None:
+                    is_admin_panel = True
+            except:
+                pass
     
     # Root admin kontrolü
     is_root_admin = False

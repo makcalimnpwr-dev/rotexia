@@ -12,10 +12,36 @@ def get_current_tenant(request):
     Tenant yoksa None döner (güvenlik için).
     
     Admin panel modunda ise None döner (tüm veriler görülebilir).
+    Root admin ve admin panelindeyse tenant yüklenmez.
     """
     # Admin panel modunda ise tenant yok
     if request.session.get('admin_panel_mode', False):
         return None
+    
+    # Admin panel path kontrolü
+    is_admin_panel_path = (
+        request.path.startswith('/admin-home') or
+        request.path.startswith('/admin/') or
+        request.path.startswith('/admin-panel/') or
+        request.path.startswith('/admin-login') or
+        'admin_mode=1' in request.GET or
+        'admin_mode=1' in request.META.get('QUERY_STRING', '')
+    )
+    
+    # Root admin kontrolü - Admin panelindeyse tenant yüklenmemeli
+    if request.user.is_authenticated:
+        try:
+            from apps.users.utils import is_root_admin
+            if is_root_admin(request.user) and is_admin_panel_path:
+                return None
+            # Root admin ise ve admin panelinden bağlanılmadıysa tenant yüklenmemeli
+            if is_root_admin(request.user):
+                admin_from_panel = request.session.get('admin_from_panel', False)
+                if not admin_from_panel and not request.path.startswith('/admin-home'):
+                    # Root admin admin panelindeyken normal view'lara giderse tenant yüklenmemeli
+                    return None
+        except:
+            pass
     
     # Önce request.tenant'ı kontrol et (middleware'den gelmiş olabilir)
     if hasattr(request, 'tenant') and request.tenant:
@@ -38,11 +64,18 @@ def get_current_tenant(request):
             tenant = request.user.tenant
             request.session['tenant_id'] = tenant.id
     
-    # Hala tenant yoksa, ilk aktif tenant'ı al (sadece geliştirme için - production'da bu olmamalı)
-    if not tenant:
-        tenant = Tenant.objects.filter(is_active=True).first()
-        if tenant:
-            request.session['tenant_id'] = tenant.id
+    # Root admin için otomatik tenant seçimi YAPILMAMALI
+    # Sadece normal kullanıcılar için ilk aktif tenant'ı al
+    if not tenant and request.user.is_authenticated:
+        try:
+            from apps.users.utils import is_root_admin
+            if not is_root_admin(request.user):
+                # Normal kullanıcı için ilk aktif tenant'ı al (sadece geliştirme için)
+                tenant = Tenant.objects.filter(is_active=True).first()
+                if tenant:
+                    request.session['tenant_id'] = tenant.id
+        except:
+            pass
     
     return tenant
 

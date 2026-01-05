@@ -1,11 +1,19 @@
 {% extends 'base.html' %}
 
 {% block content %}
+<!-- Firma Yönetimi Başlığı -->
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2 class="m-0">Firma Yönetimi</h2>
-    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addCompanyModal">
-        <i class="fas fa-plus me-2"></i> Firma Ekle
-    </button>
+    <div class="d-flex gap-2">
+        {% if tenants_without_admin %}
+        <a href="{% url 'create_missing_admin_users' %}" class="btn btn-warning" onclick="return confirm('Eksik admin kullanıcılarını oluşturmak istediğinizden emin misiniz?');">
+            <i class="fas fa-user-plus me-2"></i> Eksik Admin Kullanıcılarını Oluştur ({{ tenants_without_admin|length }})
+        </a>
+        {% endif %}
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addCompanyModal">
+            <i class="fas fa-plus me-2"></i> Firma Ekle
+        </button>
+    </div>
 </div>
 
 <div class="row">
@@ -44,9 +52,6 @@
                 <div class="d-flex justify-content-end gap-2">
                     <a href="{% url 'edit_tenant' tenant.id %}" class="btn btn-sm btn-secondary">
                         <i class="fas fa-edit me-1"></i> Düzenle
-                    </a>
-                    <a href="{% url 'select_company' tenant.id %}" class="btn btn-sm btn-primary">
-                        <i class="fas fa-external-link-alt me-1"></i> Firma Paneline Git
                     </a>
                 </div>
             </div>

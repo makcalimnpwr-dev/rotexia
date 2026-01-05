@@ -17,7 +17,7 @@ from django.db.models import Count, Q as DQ
 from django.http import HttpResponseForbidden
 from django.http import HttpResponse
 from apps.users.hierarchy_access import get_hierarchy_scope_for_user
-from apps.users.utils import ensure_root_admin_configured, get_assigned_user_ids_under_admin_node, is_root_admin
+from apps.users.utils import ensure_root_admin_configured, get_assigned_user_ids_under_admin_node, is_root_admin, get_root_admin_user
 from apps.users.decorators import root_admin_required
 from apps.users.models import UserRole, CustomUser
 
@@ -416,7 +416,7 @@ def index(request):
     return render(request, 'index.html')
 
 def company_connect(request):
-    """Firma adı girildikten sonra, firmanın login sayfasına yönlendir"""
+    """Firma adı girildikten sonra, login sayfasına yönlendir (dropdown ile seçim yapılacak)"""
     if request.method == 'POST':
         company_name = request.POST.get('company_name', '').strip()
         
@@ -424,11 +424,16 @@ def company_connect(request):
             messages.error(request, 'Lütfen firma adı girin.')
             return redirect('index')
         
-        # "Rotexia" yazıldıysa admin login'e yönlendir
-        if company_name.lower() == 'rotexia':
-            return redirect('admin_login')
+        # "Rotexia" veya sistem adı yazıldıysa login sayfasına yönlendir (tenant bilgisi olmadan)
+        # Login sayfasında dropdown ile "Geliştirici" veya firma seçilecek
+        if company_name.lower() in ['rotexia', 'sistem', 'admin']:
+            # Session'ı temizle (tenant bilgisi olmadan login sayfasına git)
+            for key in ['connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel']:
+                request.session.pop(key, None)
+            # Login sayfasına yönlendir (tenant bilgisi olmadan, dropdown ile seçim yapılacak)
+            return redirect('login')
         
-        # Firma adından tenant'ı bul
+        # Eski mantık: Firma adından tenant'ı bul (geriye dönük uyumluluk için)
         from django.utils.text import slugify
         slug = slugify(company_name)
         
@@ -500,11 +505,27 @@ def home(request):
     # Root admin kontrolü - Admin panelinden bağlanıldıysa tenant paneline git
     admin_from_panel = request.session.get('admin_from_panel', False)
     if is_root_admin(request.user) and not admin_from_panel:
-        # Admin panelinden bağlanılmadıysa, root admin'i admin paneline yönlendir
-        if subdomain == 'admin':
-            return redirect('admin_home')
-        if not has_subdomain:
-            return redirect('admin_home')
+        # Root admin için özet istatistikleri göster (anasayfa)
+        User = get_user_model()
+        all_tenants = Tenant.objects.all()
+        
+        stats = {
+            'total_tenants': all_tenants.count(),
+            'active_tenants': Tenant.objects.filter(is_active=True).count(),
+            'inactive_tenants': Tenant.objects.filter(is_active=False).count(),
+            'total_users': User.objects.filter(tenant__isnull=False).count(),  # Sadece firma kullanıcıları (root admin hariç)
+            'total_customers': Customer.objects.count(),
+            'total_tasks': VisitTask.objects.count(),
+            'completed_tasks': VisitTask.objects.filter(status='completed').count(),
+            'pending_tasks': VisitTask.objects.filter(status='pending').count(),
+        }
+        
+        context = {
+            'stats': stats,
+            'is_admin_panel': False,  # Anasayfa, admin paneli değil
+            'tenant': None,
+        }
+        return render(request, 'apps/Core/admin_dashboard.html', context)
     
     # Tenant'ı middleware'den al (subdomain veya session'dan)
     tenant = getattr(request, 'tenant', None)
@@ -545,24 +566,11 @@ def home(request):
     if is_mobile:
         return redirect('mobile_home')
     else:
-        # MASAÜSTÜ DASHBOARD - Tenant'a göre filtrele
-        from apps.core.tenant_utils import filter_by_tenant
-        total_tasks = filter_by_tenant(VisitTask.objects.all(), request).count()
-        completed_tasks = filter_by_tenant(VisitTask.objects.all(), request).filter(status='completed').count()
-        today_tasks = filter_by_tenant(VisitTask.objects.all(), request).filter(planned_date=date.today())
-        today_done = today_tasks.filter(status='completed').count()
-        
-        daily_performance = 0
-        if today_tasks.count() > 0:
-            daily_performance = int((today_done / today_tasks.count()) * 100)
-
+        # MASAÜSTÜ DASHBOARD - İSTEK ÜZERİNE BOŞALTILDI
+        # Eski KPI hesaplamaları kaldırıldı.
         context = {
             'tenant': tenant,
-            'kpi': {
-                'total_tasks': total_tasks,
-                'completed_tasks': completed_tasks,
-                'daily_performance': daily_performance,
-            }
+            'kpi': {} 
         }
         return render(request, 'apps/Core/home.html', context)
 
@@ -773,6 +781,9 @@ def admin_update_settings(request):
     return redirect('admin_home')
 
 # --- GELİŞTİRİCİ ADMIN ANA SAYFA (Firma Listesi) ---
+from django.views.decorators.cache import never_cache
+
+@never_cache
 @login_required
 @root_admin_required
 def admin_home(request):
@@ -780,13 +791,42 @@ def admin_home(request):
     Root admin için firma listesi ve yönetim sayfası
     Subdomain-only mod: Bu view sadece admin.fieldops.com'dan erişilmeli
     """
-    # Admin panelinde tenant olmamalı
+    # Admin panelinde tenant olmamalı - Session'daki tenant bilgilerini temizle
     request.tenant = None
+    
+    # Session temizliği: Admin ana sayfasına gelindiyse, herhangi bir tenant bağlantısı kesilmeli
+    # admin_from_panel dahil her şeyi temizle - HER ZAMAN YAPILIR
+    keys_to_clear = [
+        'tenant_id', 
+        'connect_tenant_id', 
+        'connect_tenant_slug', 
+        'connect_tenant_color', 
+        'connect_tenant_name',
+        'admin_from_panel'
+    ]
+    for key in keys_to_clear:
+        request.session.pop(key, None)
+    
+    # Session değişikliklerini kaydet
+    request.session.modified = True
     
     tenants = Tenant.objects.filter(is_active=True).order_by('-created_at')
     
+    # Eksik admin kullanıcılarını kontrol et
+    User = get_user_model()
+    tenants_without_admin = []
+    for tenant in tenants:
+        admin_user = User.objects.filter(
+            tenant=tenant,
+            user_code='admin',
+            authority='Admin'
+        ).first()
+        if not admin_user:
+            tenants_without_admin.append(tenant)
+    
     context = {
         'tenants': tenants,
+        'tenants_without_admin': tenants_without_admin,
         'is_admin_panel': True,
         'tenant': None,
     }
@@ -993,6 +1033,51 @@ def create_company(request):
                 is_active=True
             )
             
+            # Firma için default admin kullanıcısı oluştur
+            User = get_user_model()
+            root_admin = get_root_admin_user()
+            
+            if root_admin:
+                # Ana admin kullanıcısının şifresini al (hash'lenmiş)
+                admin_password_hash = root_admin.password
+                
+                # Firma için admin kullanıcısı oluştur
+                # Username: {slug}_admin formatında (global unique olmalı)
+                admin_username = f"{slug}_admin"
+                
+                # Eğer bu username zaten varsa, farklı bir username kullan
+                counter = 1
+                original_admin_username = admin_username
+                while User.objects.filter(username=admin_username).exists():
+                    admin_username = f"{original_admin_username}_{counter}"
+                    counter += 1
+                
+                # Admin kullanıcısını oluştur
+                admin_user = User.objects.create(
+                    username=admin_username,
+                    user_code='admin',
+                    first_name='Admin',
+                    last_name=name,
+                    email=email or f'admin@{slug}.fieldops.com',
+                    tenant=tenant,
+                    authority='Admin',
+                    is_staff=True,
+                    is_active=True
+                )
+                
+                # Ana admin'in şifre hash'ini direkt atayalım (aynı şifreyi kullanmak için)
+                admin_user.password = admin_password_hash
+                admin_user.save(update_fields=['password'])
+                
+                # Admin rolü oluştur (eğer yoksa)
+                admin_role, _ = UserRole.objects.get_or_create(
+                    name='Admin',
+                    tenant=tenant,
+                    defaults={'description': 'Firma yöneticisi'}
+                )
+                admin_user.role = admin_role
+                admin_user.save(update_fields=['role'])
+            
             # Başarı mesajında subdomain bilgisi de göster
             messages.success(
                 request, 
@@ -1004,42 +1089,97 @@ def create_company(request):
     
     return redirect('admin_home')
 
-# --- FİRMA SEÇME (Subdomain'e Yönlendir) ---
+# --- EKSİK ADMIN KULLANICILARINI OLUŞTUR ---
+@login_required
+@root_admin_required
+def create_missing_admin_users(request):
+    """Eksik admin kullanıcılarını oluştur"""
+    User = get_user_model()
+    root_admin = get_root_admin_user()
+    
+    if not root_admin:
+        messages.error(request, 'Root admin kullanıcısı bulunamadı!')
+        return redirect('admin_home')
+    
+    admin_password_hash = root_admin.password
+    tenants = Tenant.objects.all()
+    created_count = 0
+    updated_count = 0
+    
+    for tenant in tenants:
+        # Bu firma için admin kullanıcısı var mı kontrol et
+        admin_user = User.objects.filter(
+            tenant=tenant,
+            user_code='admin',
+            authority='Admin'
+        ).first()
+        
+        if admin_user:
+            # Admin kullanıcısı var, şifresini güncelle (root admin ile senkronize)
+            if admin_user.password != admin_password_hash:
+                admin_user.password = admin_password_hash
+                admin_user.save(update_fields=['password'])
+                updated_count += 1
+        else:
+            # Admin kullanıcısı yok, oluştur
+            admin_username = f"{tenant.slug}_admin"
+            
+            # Eğer bu username zaten varsa, farklı bir username kullan
+            counter = 1
+            original_admin_username = admin_username
+            while User.objects.filter(username=admin_username).exists():
+                admin_username = f"{original_admin_username}_{counter}"
+                counter += 1
+            
+            # Admin kullanıcısını oluştur
+            admin_user = User.objects.create(
+                username=admin_username,
+                user_code='admin',
+                first_name='Admin',
+                last_name=tenant.name,
+                email=tenant.email or f'admin@{tenant.slug}.fieldops.com',
+                tenant=tenant,
+                authority='Admin',
+                is_staff=True,
+                is_active=True
+            )
+            
+            # Ana admin'in şifre hash'ini direkt atayalım
+            admin_user.password = admin_password_hash
+            admin_user.save(update_fields=['password'])
+            
+            # Admin rolü oluştur (eğer yoksa)
+            admin_role, _ = UserRole.objects.get_or_create(
+                name='Admin',
+                tenant=tenant,
+                defaults={'description': 'Firma yöneticisi'}
+            )
+            admin_user.role = admin_role
+            admin_user.save(update_fields=['role'])
+            
+            created_count += 1
+    
+    if created_count > 0:
+        messages.success(request, f'✅ {created_count} firma için admin kullanıcısı oluşturuldu.')
+    if updated_count > 0:
+        messages.info(request, f'🔄 {updated_count} firma için admin şifresi güncellendi.')
+    if created_count == 0 and updated_count == 0:
+        messages.info(request, 'ℹ️ Tüm firmalar için admin kullanıcısı zaten mevcut.')
+    
+    return redirect('admin_home')
+
+# --- FİRMA SEÇME (DEVRE DIŞI) ---
+# Bu özellik kaldırıldı. Admin panelinden firma seçimi yapılamaz.
+# Kullanıcılar ana sayfadan firma adı girerek bağlanmalıdır.
 @login_required
 def select_company(request, tenant_id):
     """
-    Admin panelinden firma seçimi - Session bazlı olarak direkt o firmanın paneline giriş yapar.
-    Admin yetkisiyle full yönetim erişimi sağlar.
+    Bu özellik devre dışı bırakıldı.
+    Admin panelinden firma seçimi artık yapılamaz.
+    Kullanıcılar ana sayfadan (index.html) firma adı girerek bağlanmalıdır.
     """
-    try:
-        tenant = Tenant.objects.get(id=tenant_id, is_active=True)
-        
-        # Kullanıcının bu tenant'a erişim hakkı var mı kontrol et
-        if not is_root_admin(request.user):
-            if hasattr(request.user, 'tenant') and request.user.tenant != tenant:
-                messages.error(request, 'Bu firmaya erişim yetkiniz yok.')
-                return redirect('admin_home')
-        
-        # Admin panelinden bağlanıldığında direkt firma paneline geç
-        # Session'a tenant bilgisini kaydet (admin panelinden bağlanıldığını işaretle)
-        request.session['tenant_id'] = tenant.id
-        request.session['connect_tenant_id'] = tenant.id
-        request.session['connect_tenant_slug'] = tenant.slug
-        request.session['connect_tenant_color'] = tenant.primary_color
-        request.session['connect_tenant_name'] = tenant.name
-        request.session['admin_from_panel'] = True  # Admin panelinden bağlanıldığını işaretle
-        request.session.modified = True  # Session'ın değiştiğini işaretle
-        request.session.save()  # Session'ı kaydet
-        
-        # Admin zaten authenticated, direkt home'a yönlendir
-        messages.success(request, f'"{tenant.name}" firmasına bağlandınız.')
-        from django.urls import reverse
-        # Redirect'i absolute URL ile yap (session'ın korunması için)
-        return redirect(reverse('home'))
-        
-    except Tenant.DoesNotExist:
-        messages.error(request, 'Firma bulunamadı.')
-        return redirect('admin_home')
+    messages.info(request, 'Admin panelinden firma seçimi yapılamaz. Lütfen ana sayfadan firma adı girerek bağlanın.')
+    return redirect('admin_home')
 
 # --- ÖZEL GİRİŞ VIEW (Firma Adı ile) ---
 from django.contrib.auth.views import LoginView
@@ -1078,14 +1218,24 @@ class CustomLoginView(LoginView):
         tenant_id = request.session.get('connect_tenant_id')
         tenant_slug = request.session.get('connect_tenant_slug') or self.kwargs.get('tenant_slug')
 
-        # Eğer tenant bilgisi yoksa, ana sayfayı (index.html) göster
-        # Redirect yapmıyoruz çünkü bu sonsuz döngüye neden oluyor
+        # Tüm firmaları al (silinenler dahil) - dropdown için
+        all_tenants = Tenant.objects.all().order_by('name')
+        
+        # Eğer tenant bilgisi yoksa, dropdown ile seçim yapılacak login sayfasını göster
         if not tenant_id or not tenant_slug:
-            # Session'ı temizle (eski veriler kalmasın)
-            for key in ['connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel']:
-                request.session.pop(key, None)
-            # Ana sayfa template'ini göster (redirect yerine)
-            return render(request, 'index.html')
+            # Logout sonrası gelindi mi kontrol et
+            from_tenant_logout = request.session.get('from_tenant_logout', False)
+            logout_tenant_name = request.session.get('logout_tenant_name', '')
+            
+            context = {
+                'tenant': None,  # Tenant yok, dropdown ile seçilecek
+                'all_tenants': all_tenants,  # Tüm firmalar dropdown için
+                'primary_color': '#667eea',  # Varsayılan renk
+                'from_tenant_logout': from_tenant_logout,
+                'logout_tenant_name': logout_tenant_name,
+                'show_tenant_dropdown': True,  # Dropdown göster
+            }
+            return render(request, 'registration/login_tenant.html', context)
 
         try:
             tenant = Tenant.objects.get(id=tenant_id, slug=tenant_slug, is_active=True)
@@ -1100,29 +1250,193 @@ class CustomLoginView(LoginView):
 
         context = {
             'tenant': tenant,
+            'all_tenants': all_tenants,  # Dropdown için tüm firmalar
             'primary_color': request.session.get('connect_tenant_color', tenant.primary_color),
             'from_tenant_logout': from_tenant_logout,
             'logout_tenant_name': logout_tenant_name,
+            'show_tenant_dropdown': False,  # Tenant seçilmiş, dropdown gösterme
         }
         return render(request, 'registration/login_tenant.html', context)
     
     def post(self, request, *args, **kwargs):
         username = request.POST.get('username', '').strip()
         password = request.POST.get('password', '')
-        tenant_id = request.session.get('connect_tenant_id')
-        tenant_slug = request.session.get('connect_tenant_slug') or request.POST.get('tenant_slug', '').strip()
-
-        if not tenant_id or not tenant_slug:
-            messages.error(request, 'Lütfen önce firma adını girin.')
-            return redirect('index')
-
+        
+        # Dropdown'dan seçilen değeri al
+        selected_tenant_option = request.POST.get('tenant_selection', '').strip()
+        
+        User = get_user_model()
+        root_admin = get_root_admin_user()
+        
+        # "Geliştirici" seçildiyse ana admin sistemine giriş yap
+        if selected_tenant_option == 'developer' or selected_tenant_option == '':
+            if root_admin and username == root_admin.username:
+                if root_admin.check_password(password):
+                    login(request, root_admin, backend='django.contrib.auth.backends.ModelBackend')
+                    # Session'ı temizle (admin panelinde tenant olmamalı)
+                    for key in ['tenant_id', 'connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel']:
+                        request.session.pop(key, None)
+                    messages.success(request, 'Ana admin sistemine başarıyla giriş yaptınız.')
+                    return redirect('admin_home')
+                else:
+                    messages.error(request, 'Kullanıcı adı veya şifre hatalı.')
+                    return redirect('login')
+            else:
+                messages.error(request, 'Geliştirici sistemine giriş için admin kullanıcı adı gereklidir.')
+                return redirect('login')
+        
+        # Firma seçildiyse o firmanın admin kullanıcısına giriş yap
         try:
-            tenant = Tenant.objects.get(id=tenant_id, slug=tenant_slug, is_active=True)
-        except Tenant.DoesNotExist:
-            messages.error(request, 'Firma bulunamadı. Lütfen tekrar deneyin.')
-            for key in ['connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name']:
-                request.session.pop(key, None)
-            return redirect('index')
+            tenant = Tenant.objects.get(id=int(selected_tenant_option))
+        except (Tenant.DoesNotExist, ValueError, TypeError):
+            messages.error(request, 'Geçersiz firma seçimi.')
+            return redirect('login')
+        
+        # Root admin kullanıcı adı ve şifresi ile giriş yapılıyorsa, o firmanın admin kullanıcısına giriş yap
+        if root_admin and username == root_admin.username:
+            if root_admin.check_password(password):
+                # O firmanın admin kullanıcısını bul - daha esnek arama
+                # Önce tam eşleşme dene
+                tenant_admin = User.objects.filter(
+                    tenant=tenant,
+                    user_code='admin',
+                    authority='Admin'
+                ).first()
+                
+                # Eğer bulunamazsa, username ile başlayanları ara
+                if not tenant_admin:
+                    tenant_admin = User.objects.filter(
+                        username__startswith=f"{tenant.slug}_admin",
+                        tenant=tenant
+                    ).first()
+                
+                # Hala bulunamazsa, sadece tenant ve admin koduna göre ara
+                if not tenant_admin:
+                    tenant_admin = User.objects.filter(
+                        tenant=tenant,
+                        user_code='admin'
+                    ).first()
+                
+                if tenant_admin:
+                    # O firmanın admin kullanıcısına giriş yap
+                    login(request, tenant_admin, backend='django.contrib.auth.backends.ModelBackend')
+                    # Session'a tenant bilgisini kaydet
+                    request.session['tenant_id'] = tenant.id
+                    request.session['connect_tenant_id'] = tenant.id
+                    request.session['connect_tenant_slug'] = tenant.slug
+                    request.session['connect_tenant_color'] = tenant.primary_color
+                    request.session['connect_tenant_name'] = tenant.name
+                    messages.success(request, f'"{tenant.name}" firmasına başarıyla giriş yaptınız.')
+                    return redirect('home')
+                else:
+                    # Admin kullanıcısı yoksa otomatik oluştur
+                    admin_username = f"{tenant.slug}_admin"
+                    
+                    # Eğer bu username zaten varsa, farklı bir username kullan
+                    counter = 1
+                    original_admin_username = admin_username
+                    while User.objects.filter(username=admin_username).exists():
+                        admin_username = f"{original_admin_username}_{counter}"
+                        counter += 1
+                    
+                    # Admin kullanıcısını oluştur
+                    tenant_admin = User.objects.create(
+                        username=admin_username,
+                        user_code='admin',
+                        first_name='Admin',
+                        last_name=tenant.name,
+                        email=tenant.email or f'admin@{tenant.slug}.fieldops.com',
+                        tenant=tenant,
+                        authority='Admin',
+                        is_staff=True,
+                        is_active=True
+                    )
+                    
+                    # Ana admin'in şifre hash'ini direkt atayalım
+                    tenant_admin.password = root_admin.password
+                    tenant_admin.save(update_fields=['password'])
+                    
+                    # Admin rolü oluştur (eğer yoksa)
+                    admin_role, _ = UserRole.objects.get_or_create(
+                        name='Admin',
+                        tenant=tenant,
+                        defaults={'description': 'Firma yöneticisi'}
+                    )
+                    tenant_admin.role = admin_role
+                    tenant_admin.save(update_fields=['role'])
+                    
+                    # Oluşturulan admin kullanıcısına giriş yap
+                    login(request, tenant_admin, backend='django.contrib.auth.backends.ModelBackend')
+                    # Session'a tenant bilgisini kaydet
+                    request.session['tenant_id'] = tenant.id
+                    request.session['connect_tenant_id'] = tenant.id
+                    request.session['connect_tenant_slug'] = tenant.slug
+                    request.session['connect_tenant_color'] = tenant.primary_color
+                    request.session['connect_tenant_name'] = tenant.name
+                    messages.success(request, f'"{tenant.name}" firması için admin kullanıcısı otomatik olarak oluşturuldu ve giriş yapıldı.')
+                    return redirect('home')
+            else:
+                messages.error(request, 'Kullanıcı adı veya şifre hatalı.')
+                return redirect('login')
+        
+        # Eski mantık: Session'dan tenant bilgisi al (geriye dönük uyumluluk)
+        # Eğer dropdown'dan seçim yapılmadıysa session'dan al
+        if not selected_tenant_option or selected_tenant_option == '':
+            tenant_id = request.session.get('connect_tenant_id')
+            tenant_slug = request.session.get('connect_tenant_slug') or request.POST.get('tenant_slug', '').strip()
+
+            if not tenant_id or not tenant_slug:
+                messages.error(request, 'Lütfen bir sistem seçin.')
+                return redirect('login')
+
+            try:
+                tenant = Tenant.objects.get(id=tenant_id, slug=tenant_slug, is_active=True)
+            except Tenant.DoesNotExist:
+                messages.error(request, 'Firma bulunamadı. Lütfen tekrar deneyin.')
+                for key in ['connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name']:
+                    request.session.pop(key, None)
+                return redirect('login')
+            
+            # Eski mantıkta da root admin kontrolü yap
+            if root_admin and username == root_admin.username:
+                if root_admin.check_password(password):
+                    # O firmanın admin kullanıcısını bul - daha esnek arama
+                    tenant_admin = User.objects.filter(
+                        tenant=tenant,
+                        user_code='admin',
+                        authority='Admin'
+                    ).first()
+                    
+                    if not tenant_admin:
+                        tenant_admin = User.objects.filter(
+                            username__startswith=f"{tenant.slug}_admin",
+                            tenant=tenant
+                        ).first()
+                    
+                    if not tenant_admin:
+                        tenant_admin = User.objects.filter(
+                            tenant=tenant,
+                            user_code='admin'
+                        ).first()
+                    
+                    if tenant_admin:
+                        login(request, tenant_admin, backend='django.contrib.auth.backends.ModelBackend')
+                        request.session['tenant_id'] = tenant.id
+                        request.session['connect_tenant_id'] = tenant.id
+                        request.session['connect_tenant_slug'] = tenant.slug
+                        request.session['connect_tenant_color'] = tenant.primary_color
+                        request.session['connect_tenant_name'] = tenant.name
+                        messages.success(request, f'"{tenant.name}" firmasına başarıyla giriş yaptınız.')
+                        return redirect('home')
+                    else:
+                        # Admin kullanıcısı yoksa hata ver (güvenlik için otomatik oluşturma yok)
+                        messages.error(request, f'Bu firma için admin kullanıcısı bulunamadı. Lütfen admin paneline gidin ve firmayı kontrol edin veya firmayı yeniden oluşturun.')
+                        return redirect('login')
+                else:
+                    messages.error(request, 'Kullanıcı adı veya şifre hatalı.')
+                    return redirect('login')
+        
+        # Artık tenant bilgisi var, normal kullanıcı girişi yapılabilir
         
         # Username'i tenant slug ile birleştir (örn: Merch1 -> pastel_Merch1)
         # Önce direkt username'i dene, sonra tenant slug ile birleştirilmiş halini dene

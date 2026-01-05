@@ -7,6 +7,7 @@ import json
 
 from .models import Survey, Question, QuestionOption
 from apps.users.models import UserRole, CustomUser, UserFieldDefinition
+from apps.users.decorators import tenant_required
 # --- HATAYI ÇÖZEN SATIR ---
 from apps.customers.models import Customer, CustomerCari, CustomerFieldDefinition, CustomFieldDefinition
 # --------------------------
@@ -15,7 +16,23 @@ from apps.core.tenant_utils import filter_by_tenant, set_tenant_on_save
 # 1. ANKET LİSTESİ
 @login_required
 def survey_list(request):
-    surveys = filter_by_tenant(Survey.objects.all(), request).order_by('-created_at')
+    # Admin panel kontrolü - Admin panelindeyken tenant kontrolünü atla
+    from apps.users.utils import is_root_admin
+    
+    is_admin_panel_path = (
+        request.path.startswith('/admin-home') or
+        request.path.startswith('/admin/') or
+        request.path.startswith('/admin-panel/') or
+        request.path.startswith('/admin-login') or
+        'admin_mode=1' in request.GET or
+        'admin_mode=1' in request.META.get('QUERY_STRING', '')
+    )
+    
+    # Admin panelindeyken tüm formları göster (tenant filtresi yok)
+    if is_root_admin(request.user) and is_admin_panel_path:
+        surveys = Survey.objects.all().order_by('-created_at')
+    else:
+        surveys = filter_by_tenant(Survey.objects.all(), request).order_by('-created_at')
     return render(request, 'forms/list.html', {'surveys': surveys})
 
 # 2. YENİ ANKET OLUŞTURMA

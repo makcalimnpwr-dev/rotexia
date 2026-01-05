@@ -11,8 +11,9 @@ urlpatterns = [
     path('admin-login/', views.AdminLoginView.as_view(), name='admin_login'),
     path('admin/update-settings/', views.admin_update_settings, name='admin_update_settings'),
     path('company/create/', views.create_company, name='create_company'),
-    path('company/select/<int:tenant_id>/', views.select_company, name='select_company'),
+    # path('company/select/<int:tenant_id>/', views.select_company, name='select_company'),  # Devre dışı bırakıldı
     path('company/edit/<int:tenant_id>/', views.edit_tenant, name='edit_tenant'),
+    path('company/create-missing-admins/', views.create_missing_admin_users, name='create_missing_admin_users'),
     # ... mevcut urller ...
     path('app/', views.mobile_home, name='mobile_home'), # Mobilin anasayfası
     path('app/team/', views.mobile_team_home, name='mobile_team_home'),

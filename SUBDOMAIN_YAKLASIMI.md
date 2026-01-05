@@ -181,3 +181,6 @@ Tenant.objects.create(
 **Tek yapmanız gereken:** DNS wildcard kaydı ve küçük settings güncellemesi. Kod aynı kalır!
 
 
+
+
+

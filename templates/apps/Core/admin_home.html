@@ -53,6 +53,12 @@
                     <a href="{% url 'edit_tenant' tenant.id %}" class="btn btn-sm btn-secondary">
                         <i class="fas fa-edit me-1"></i> Düzenle
                     </a>
+                    <form method="post" action="{% url 'delete_tenant' tenant.id %}" style="display: inline;" onsubmit="return confirm('Bu firmayı silmek istediğinizden emin misiniz? Bu işlem geri alınamaz ve firma ile ilgili tüm veriler (kullanıcılar, müşteriler, görevler vb.) silinecektir.');">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-danger">
+                            <i class="fas fa-trash me-1"></i> Sil
+                        </button>
+                    </form>
                 </div>
             </div>
         </div>

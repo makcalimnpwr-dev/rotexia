@@ -444,7 +444,7 @@ def company_connect(request):
             ).first()
             
             if not tenant:
-                messages.error(request, f'"{company_name}" adında bir firma bulunamadı.')
+                messages.error(request, f'Böyle bir firma bulunmamaktadır. Lütfen firma adını kontrol edin.')
                 return redirect('index')
             
             # Firma bilgilerini session'a kaydet (login sayfasında kullanılacak)
@@ -720,29 +720,76 @@ class AdminLoginView(LoginView):
 from django.contrib.auth import logout as auth_logout
 
 def logout_view(request):
-    """Logout ve session temizleme - Tenant varsa o tenant'ın login sayfasına yönlendir"""
-    tenant_id = request.session.get('tenant_id')
+    """Logout - Tenant varsa o tenant'ın login sayfasına yönlendir, root admin ise admin login'e"""
+    # Önce kullanıcının root admin olup olmadığını kontrol et (logout'tan önce)
+    is_root_admin_user = False
+    if request.user.is_authenticated:
+        try:
+            from apps.users.utils import is_root_admin
+            is_root_admin_user = is_root_admin(request.user)
+        except:
+            pass
+    
+    # Önce tenant bilgilerini al (logout'tan önce - session'dan)
+    tenant_id = request.session.get('tenant_id') or request.session.get('connect_tenant_id')
     tenant_slug = request.session.get('connect_tenant_slug')
     tenant_name = request.session.get('connect_tenant_name')
+    tenant_color = request.session.get('connect_tenant_color')
     
+    # Kullanıcının tenant'ını kontrol et (user objesinden)
+    user_tenant_id = None
+    user_tenant_slug = None
+    user_tenant_name = None
+    user_tenant_color = None
+    
+    if request.user.is_authenticated and hasattr(request.user, 'tenant') and request.user.tenant:
+        user_tenant_id = request.user.tenant.id
+        user_tenant_slug = request.user.tenant.slug
+        user_tenant_name = request.user.tenant.name
+        user_tenant_color = request.user.tenant.primary_color
+    
+    # Logout yap (kullanıcı oturumunu sonlandır)
     auth_logout(request)
     
-    # Tenant bilgilerini temizle
-    for key in ['tenant_id', 'connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel']:
-        request.session.pop(key, None)
+    # Root admin ise login sayfasına yönlendir (dropdown ile sistem seçimi yapılacak)
+    if is_root_admin_user:
+        # Tüm session'ı temizle (dropdown ile seçim yapılacak)
+        for key in ['tenant_id', 'connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel', 'from_tenant_logout', 'logout_tenant_slug', 'logout_tenant_name']:
+            request.session.pop(key, None)
+        return redirect('login')  # Login sayfasına yönlendir (dropdown ile "Geliştirici" seçilebilir)
     
-    # Eğer tenant varsa, o tenant'ın login sayfasına yönlendir
-    if tenant_slug:
-        # Tenant bilgisini logout sonrası için sakla
+    # Tenant kullanıcısı çıkışı
+    # Logout'tan önce hangi tenant bilgisini kullanacağımızı belirle
+    # Öncelik user'ın tenant'ına verilir, yoksa session'dakine
+    final_tenant_id = user_tenant_id or tenant_id
+    final_tenant_slug = user_tenant_slug or tenant_slug
+    final_tenant_name = user_tenant_name or tenant_name
+    final_tenant_color = user_tenant_color or tenant_color
+    
+    # Eğer tenant varsa, tenant bilgilerini session'a tekrar kaydet (logout sonrası)
+    if final_tenant_id and final_tenant_slug:
+        # Tenant bilgilerini session'a kaydet (login sayfasında kullanılacak)
+        request.session['connect_tenant_id'] = final_tenant_id
+        request.session['connect_tenant_slug'] = final_tenant_slug
+        request.session['connect_tenant_name'] = final_tenant_name
+        if final_tenant_color:
+            request.session['connect_tenant_color'] = final_tenant_color
+        
+        # Logout flag'i ekle (login sayfasında mesaj göstermek için)
         request.session['from_tenant_logout'] = True
-        request.session['logout_tenant_slug'] = tenant_slug
-        request.session['logout_tenant_name'] = tenant_name or 'Firma'
+        request.session['logout_tenant_name'] = final_tenant_name or 'Firma'
+        
+        # Temizle: aktif tenant ID'si ve admin panel flag'i
+        request.session.pop('tenant_id', None)
+        request.session.pop('admin_from_panel', None)
         
         # Login sayfasına yönlendir (tenant bilgisi session'da)
         return redirect('login')
     else:
-        # Tenant yoksa direkt login sayfasına git
-        return redirect('login')
+        # Tenant yoksa tüm session'ı temizle
+        for key in ['tenant_id', 'connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel', 'from_tenant_logout', 'logout_tenant_slug', 'logout_tenant_name']:
+            request.session.pop(key, None)
+        return redirect('index')  # Ana sayfaya yönlendir
 
 # --- ADMIN AYARLARI GÜNCELLEME ---
 @login_required
@@ -1100,6 +1147,31 @@ def create_company(request):
 # --- EKSİK ADMIN KULLANICILARINI OLUŞTUR ---
 @login_required
 @root_admin_required
+def delete_tenant(request, tenant_id):
+    """Firma silme - Tüm ilişkili verilerle birlikte silinir"""
+    tenant = get_object_or_404(Tenant, id=tenant_id)
+    tenant_name = tenant.name
+    
+    if request.method == 'POST':
+        try:
+            # Firma adını kaydet (mesaj için)
+            tenant_name = tenant.name
+            
+            # Firmayı sil (CASCADE ilişkileri sayesinde tüm ilişkili veriler de silinir)
+            tenant.delete()
+            
+            messages.success(request, f'✅ Firma "{tenant_name}" başarıyla silindi.')
+        except Exception as e:
+            messages.error(request, f'❌ Firma silinirken hata oluştu: {str(e)}')
+        
+        return redirect('admin_home')
+    
+    # GET request - Silme onay sayfası
+    # Bu sayfayı kullanmak yerine JavaScript confirm kullanacağız
+    return redirect('admin_home')
+
+@login_required
+@root_admin_required
 def create_missing_admin_users(request):
     """Eksik admin kullanıcılarını oluştur"""
     User = get_user_model()
@@ -1277,7 +1349,8 @@ class CustomLoginView(LoginView):
         root_admin = get_root_admin_user()
         
         # "Geliştirici" seçildiyse ana admin sistemine giriş yap
-        if selected_tenant_option == 'developer' or selected_tenant_option == '':
+        # Sadece açıkça 'developer' seçildiğinde bu mantık çalışsın
+        if selected_tenant_option == 'developer':
             if root_admin and username == root_admin.username:
                 if root_admin.check_password(password):
                     login(request, root_admin, backend='django.contrib.auth.backends.ModelBackend')
@@ -1293,12 +1366,42 @@ class CustomLoginView(LoginView):
                 messages.error(request, 'Geliştirici sistemine giriş için admin kullanıcı adı gereklidir.')
                 return redirect('login')
         
-        # Firma seçildiyse o firmanın admin kullanıcısına giriş yap
-        try:
-            tenant = Tenant.objects.get(id=int(selected_tenant_option))
-        except (Tenant.DoesNotExist, ValueError, TypeError):
-            messages.error(request, 'Geçersiz firma seçimi.')
-            return redirect('login')
+        # Tenant'ı belirle: Dropdown'dan seçildiyse onu kullan, yoksa session'dan al
+        tenant = None
+        
+        # Önce dropdown'dan seçilen tenant'ı kontrol et
+        if selected_tenant_option and selected_tenant_option != '':
+            try:
+                tenant = Tenant.objects.get(id=int(selected_tenant_option), is_active=True)
+            except (Tenant.DoesNotExist, ValueError, TypeError):
+                messages.error(request, 'Geçersiz firma seçimi.')
+                return redirect('login')
+        else:
+            # Dropdown'dan seçim yapılmamışsa, session'dan tenant bilgisini al
+            tenant_id = request.session.get('connect_tenant_id')
+            tenant_slug = request.session.get('connect_tenant_slug')
+            
+            if tenant_id:
+                try:
+                    tenant = Tenant.objects.get(id=tenant_id, is_active=True)
+                    # Slug'ı da kontrol et (güvenlik için)
+                    if tenant_slug and tenant.slug != tenant_slug:
+                        messages.error(request, 'Firma bilgisi uyumsuz. Lütfen tekrar firma adını girin.')
+                        return redirect('index')
+                except Tenant.DoesNotExist:
+                    messages.error(request, 'Firma bulunamadı. Lütfen tekrar firma adını girin.')
+                    # Session'ı temizle
+                    for key in ['connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name']:
+                        request.session.pop(key, None)
+                    return redirect('index')
+            else:
+                messages.error(request, 'Lütfen bir firma seçin veya firma adını girin.')
+                return redirect('index')
+        
+        # Tenant bulunamadıysa hata ver
+        if not tenant:
+            messages.error(request, 'Firma bilgisi bulunamadı. Lütfen tekrar deneyin.')
+            return redirect('index')
         
         # Root admin kullanıcı adı ve şifresi ile giriş yapılıyorsa, o firmanın admin kullanıcısına giriş yap
         if root_admin and username == root_admin.username:
@@ -1386,6 +1489,64 @@ class CustomLoginView(LoginView):
             else:
                 messages.error(request, 'Kullanıcı adı veya şifre hatalı.')
                 return redirect('login')
+        
+        # Root admin değilse, normal kullanıcı girişi yap
+        # Firma seçildi, normal kullanıcı girişi yapılabilir
+        user = None
+        username_attempts = [
+            f"{tenant.slug}_{username}",  # tenant_slug_username
+            username,  # username (eski kullanıcılar için)
+        ]
+        
+        for username_attempt in username_attempts:
+            user = authenticate(request, username=username_attempt, password=password)
+            if user is not None:
+                break
+        
+        if user is not None and user.is_active:
+            # Root admin kontrolü - root admin burada zaten handle edildi, buraya gelmemeli
+            from apps.users.utils import is_root_admin
+            
+            if not is_root_admin(user):
+                # Normal kullanıcı için tenant kontrolü
+                if hasattr(user, 'tenant') and user.tenant:
+                    if user.tenant != tenant:
+                        messages.error(request, f'Bu kullanıcı "{user.tenant.name}" firmasına aittir. Lütfen doğru firmayı seçin.')
+                        return redirect('login')
+                else:
+                    # Kullanıcının tenant'ı yoksa, seçilen tenant'ı ata
+                    user.tenant = tenant
+                    user.save()
+                    messages.info(request, f'Kullanıcınız "{tenant.name}" firmasına atandı.')
+            
+            login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+            # Session'a tenant bilgisini kaydet
+            request.session['tenant_id'] = tenant.id
+            request.session['connect_tenant_id'] = tenant.id
+            request.session['connect_tenant_slug'] = tenant.slug
+            request.session['connect_tenant_color'] = tenant.primary_color
+            request.session['connect_tenant_name'] = tenant.name
+            messages.success(request, f'"{tenant.name}" firmasına başarıyla giriş yaptınız.')
+            return redirect('home')
+        
+        # Kullanıcı bulunamadı veya şifre yanlış
+        # Kullanıcı adı var mı kontrol et
+        user_exists = False
+        for username_attempt in username_attempts:
+            try:
+                potential_user = User.objects.get(username=username_attempt)
+                if potential_user.tenant == tenant or (not hasattr(potential_user, 'tenant') or potential_user.tenant is None):
+                    user_exists = True
+                    break
+            except User.DoesNotExist:
+                continue
+        
+        if user_exists:
+            messages.error(request, 'Şifre hatalı. Lütfen şifrenizi kontrol edin.')
+        else:
+            messages.error(request, 'Kullanıcı adı veya şifre hatalı.')
+        
+        return redirect('login')
         
         # Eski mantık: Session'dan tenant bilgisi al (geriye dönük uyumluluk)
         # Eğer dropdown'dan seçim yapılmadıysa session'dan al

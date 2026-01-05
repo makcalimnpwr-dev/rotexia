@@ -13,6 +13,7 @@ urlpatterns = [
     path('company/create/', views.create_company, name='create_company'),
     # path('company/select/<int:tenant_id>/', views.select_company, name='select_company'),  # Devre dışı bırakıldı
     path('company/edit/<int:tenant_id>/', views.edit_tenant, name='edit_tenant'),
+    path('company/delete/<int:tenant_id>/', views.delete_tenant, name='delete_tenant'),
     path('company/create-missing-admins/', views.create_missing_admin_users, name='create_missing_admin_users'),
     # ... mevcut urller ...
     path('app/', views.mobile_home, name='mobile_home'), # Mobilin anasayfası

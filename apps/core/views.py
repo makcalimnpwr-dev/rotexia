@@ -495,8 +495,16 @@ def home(request):
     host = request.get_host()
     host_without_port = host.split(':')[0] if ':' in host else host
     
-    # Subdomain kontrolü (127.0.0.1 veya localhost gibi durumlar için)
-    has_subdomain = '.' in host_without_port and host_without_port not in ['127.0.0.1', 'localhost']
+    # Render veya benzeri servislerde subdomain yok, session bazlı çalış
+    # Render domain'leri: *.onrender.com
+    is_render_domain = 'onrender.com' in host_without_port
+    
+    # Subdomain kontrolü (Render ve localhost hariç)
+    has_subdomain = (
+        '.' in host_without_port and 
+        host_without_port not in ['127.0.0.1', 'localhost'] and
+        not is_render_domain  # Render'da subdomain yok, session bazlı
+    )
     subdomain = None
     if has_subdomain:
         parts = host_without_port.split('.')

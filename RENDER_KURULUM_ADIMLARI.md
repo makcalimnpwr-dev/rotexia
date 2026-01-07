@@ -143,3 +143,5 @@ Eğer Render Pro planınız varsa, cron job kullanabilirsiniz:
 Bu daha az kaynak kullanır ama Pro plan gerekir.
 
 
+
+

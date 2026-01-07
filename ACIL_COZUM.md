@@ -70,3 +70,5 @@ Bu görev her 5 dakikada bir `python manage.py send_automated_emails` komutunu �
 - Görev "Run whether user is logged on or not" olarak ayarlanmış mı?
 
 
+
+

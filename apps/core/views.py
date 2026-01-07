@@ -2153,7 +2153,7 @@ def mobile_task_detail(request, pk):
     if not tenant and hasattr(user, 'tenant') and user.tenant:
         tenant = user.tenant
     
-    # Aktif anketleri başlangıç olarak al - tenant filtresi ile
+    # Aktif anketleri başlangıç olarak al - sadece bu tenant'a ait (temel yapı yok, anketler firma-özel)
     if tenant:
         surveys = Survey.objects.filter(is_active=True, tenant=tenant)
     else:
@@ -2388,8 +2388,29 @@ def mobile_fill_survey(request, task_id, survey_id):
                     except Exception:
                         photo_val = None
                 
-                # Eğer soruya bir cevap verilmişse (Yazı veya Fotoğraf)
-                if text_val or photo_val:
+                # Video kontrolü
+                video_val = None
+                if q.input_type == 'video':
+                    video_file = request.FILES.get(f'q_{q.id}')
+                    if video_file:
+                        video_val = video_file
+                
+                # Konum kontrolü
+                latitude = None
+                longitude = None
+                if q.input_type == 'location':
+                    lat_str = request.POST.get(f'q_{q.id}_latitude', '').strip()
+                    lng_str = request.POST.get(f'q_{q.id}_longitude', '').strip()
+                    if lat_str and lng_str:
+                        try:
+                            latitude = float(lat_str)
+                            longitude = float(lng_str)
+                        except (ValueError, TypeError):
+                            latitude = None
+                            longitude = None
+                
+                # Eğer soruya bir cevap verilmişse (Yazı, Fotoğraf, Video veya Konum)
+                if text_val or photo_val or video_val or (latitude is not None and longitude is not None):
                     # Önce eski cevap varsa silelim (Güncelleme mantığı)
                     SurveyAnswer.objects.filter(task=task, question=q).delete()
                     
@@ -2398,7 +2419,11 @@ def mobile_fill_survey(request, task_id, survey_id):
                         task=task,
                         question=q,
                         answer_text=text_val,
-                        answer_photo=photo_val
+                        answer_photo=photo_val,
+                        answer_video=video_val,
+                        latitude=latitude,
+                        longitude=longitude,
+                        tenant=tenant
                     )
             
             # AJAX isteği ise JSON döndür
@@ -2707,11 +2732,11 @@ def check_required_surveys(request, task_id):
     if task.merch_code != request.user.username:
         return JsonResponse({'success': False, 'message': 'Yetkisiz.'}, status=403)
     
-    # Bu görev için gösterilen tüm anketleri al - Tenant filtresi ekle
+    # Bu görev için gösterilen tüm anketleri al - sadece bu tenant'a ait (temel yapı yok)
     task_tenant = task.customer.tenant if task.customer and task.customer.tenant else None
     surveys = Survey.objects.filter(is_active=True)
     
-    # Tenant filtresi: Sadece bu görevin tenant'ına ait anketleri al
+    # Tenant filtresi: Sadece bu görevin tenant'ına ait anketler (temel yapı yok)
     if task_tenant:
         surveys = surveys.filter(tenant=task_tenant)
     else:
@@ -3746,6 +3771,11 @@ def _send_automated_email(automated_email, force=False):
         if automated_email.period == 'daily':
             if automated_email.day_option != 'every_day':
                 return False, "Günlük periyot için sadece 'Her Gün' seçilebilir"
+            # Günde bir kez kontrolü - bugün zaten gönderilmişse tekrar gönderme
+            if automated_email.last_sent_at:
+                last_sent_date_turkey = automated_email.last_sent_at.astimezone(turkey_tz).date()
+                if last_sent_date_turkey == today:
+                    return False, f"Bugün zaten gönderildi (Son gönderim: {automated_email.last_sent_at.astimezone(turkey_tz).strftime('%d.%m.%Y %H:%M')} TSİ)"
             # Saat kontrolü - Türkiye saatine göre kontrol et
             send_time = automated_email.send_time
             if send_time:
@@ -3757,8 +3787,6 @@ def _send_automated_email(automated_email, force=False):
                 
                 if now_datetime < send_datetime:
                     return False, f"Gönderim saati henüz gelmedi (Gönderim saati: {send_time.strftime('%H:%M')} TSİ, Şimdi: {current_time_turkey.strftime('%H:%M')} TSİ)"
-                # Gönderim saati geçtiyse ve bugün gönderilmediyse, gönder
-                # (5 dakika tolerans yok, sadece gönderim saatinden sonra olması yeterli)
         
         elif automated_email.period == 'weekly':
             if today.weekday() != 0:  # Pazartesi = 0
@@ -3788,9 +3816,8 @@ def _send_automated_email(automated_email, force=False):
                 if now_datetime < send_datetime:
                     return False, f"Gönderim saati henüz gelmedi (Gönderim saati: {send_time.strftime('%H:%M')} TSİ, Şimdi: {current_time_turkey.strftime('%H:%M')} TSİ)"
         
-        # NOT: "Her Gün" periyotunda günde bir kez kontrolü YOK
-        # Kullanıcı saati değiştirebilir ve istediği zaman gönderebilir
-        # Sadece gönderim saatinden sonra olması yeterli
+        # "Her Gün" periyotunda günde bir kez kontrolü var
+        # Bugün zaten gönderilmişse, yarın bekleyecek
     
     # Raporları oluştur
     selected_reports = automated_email.selected_reports or {}

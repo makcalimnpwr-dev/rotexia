@@ -39,3 +39,5 @@ for email in automated_emails:
 
 print("\n" + "=" * 60)
 
+
+

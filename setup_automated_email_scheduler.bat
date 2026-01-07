@@ -39,17 +39,23 @@ echo.
 REM Mevcut görevi sil (varsa)
 schtasks /Delete /TN "%TASK_NAME%" /F >nul 2>&1
 
-REM Yeni görev oluştur
+REM Yeni görev oluştur (gizli CMD penceresi ile)
 echo Görev oluşturuluyor...
 schtasks /Create /TN "%TASK_NAME%" ^
-    /TR "\"%PYTHON_CMD%\" \"%PROJECT_DIR%\manage.py\" send_automated_emails" ^
+    /TR "cmd.exe /c \"\"%PYTHON_CMD%\" \"%PROJECT_DIR%\manage.py\" send_automated_emails > \"%PROJECT_DIR%\automated_email_log.txt\" 2>&1\"" ^
     /SC MINUTE /MO 5 ^
     /ST 00:00 ^
     /RU SYSTEM ^
-    /RL HIGHEST ^
+    /RL LIMITED ^
     /F ^
     /D "%TASK_DESC%"
 
+REM Görevi gizli çalıştıracak şekilde ayarla (PowerShell ile)
+echo CMD penceresi gizleniyor...
+powershell -Command "$task = Get-ScheduledTask -TaskName '%TASK_NAME%'; $settings = $task.Settings; $settings.Hidden = $true; $settings.ShowInTaskScheduler = $true; Set-ScheduledTask -TaskName '%TASK_NAME%' -Settings $settings" >nul 2>&1
+
+REM Görev oluşturuldu mu kontrol et
+schtasks /Query /TN "%TASK_NAME%" >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
     echo.
     echo ============================================

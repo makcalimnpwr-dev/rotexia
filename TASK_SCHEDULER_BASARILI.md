@@ -99,3 +99,5 @@ Artık otomatik mail sistemi **tamamen çalışıyor!**
 
 Task Scheduler her 5 dakikada bir otomatik olarak kontrol edecek ve gönderim saatinde mail gönderecek.
 
+
+

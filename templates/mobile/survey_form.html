@@ -252,6 +252,89 @@
             {% elif item.question.input_type == 'textarea' %}
                 <textarea name="q_{{ item.question.id }}" class="form-control p-3 survey-input" rows="3" placeholder="Detaylı açıklama..." {% if item.question.required %}required{% endif %} oninput="checkProgress()"></textarea>
 
+            {% elif item.question.input_type == 'video' %}
+                <div class="d-flex justify-content-end mb-2">
+                    <button type="button" class="photo-icon-btn" onclick="triggerVideo('{{ item.question.id }}')" aria-label="Video çek">
+                        <i class="fas fa-video"></i>
+                    </button>
+                </div>
+
+                <div class="photo-wrapper">
+                    <input type="file" 
+                           name="q_{{ item.question.id }}" 
+                           id="file_video_{{ item.question.id }}"
+                           class="invisible-input survey-input"
+                           accept="video/*"
+                           capture="camcorder"
+                           onchange="showVideoPreview(this, '{{ item.question.id }}')">
+                    <input type="hidden"
+                           name="q_{{ item.question.id }}_video"
+                           id="video_{{ item.question.id }}"
+                           {% if item.question.required %}data-required-video="1"{% endif %}>
+
+                    <label for="file_video_{{ item.question.id }}" class="camera-btn" id="btn_video_area_{{ item.question.id }}" onclick="startVideoPoll('{{ item.question.id }}')">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M0 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V6zm12-1a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2zM5 8.5a.5.5 0 1 0-1 0 .5.5 0 0 0 1 0z"/>
+                        </svg>
+                        <span class="camera-text">VİDEO ÇEK (Max 2 dk)</span>
+                    </label>
+
+                    <div id="preview_video_area_{{ item.question.id }}" class="preview-container" style="display:none;">
+                        <div class="d-flex align-items-center">
+                            <video id="video_preview_{{ item.question.id }}" src="" class="preview-img" controls style="max-width: 150px; max-height: 150px;"></video>
+                            <div class="ms-3 flex-grow-1">
+                                <h6 class="text-success mb-1 small fw-bold">
+                                    <i class="fas fa-check-circle"></i> Video Yüklendi
+                                </h6>
+                                <label for="file_video_{{ item.question.id }}" class="btn btn-sm btn-outline-warning w-100">
+                                    Yeniden Çek
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            {% elif item.question.input_type == 'location' %}
+                <div class="d-flex justify-content-end mb-2">
+                    <button type="button" class="photo-icon-btn" onclick="getCurrentLocation('{{ item.question.id }}')" aria-label="Konum Al">
+                        <i class="fas fa-map-marker-alt"></i>
+                    </button>
+                </div>
+
+                <div class="photo-wrapper">
+                    <input type="hidden"
+                           name="q_{{ item.question.id }}_latitude"
+                           id="lat_{{ item.question.id }}"
+                           {% if item.question.required %}data-required-location="1"{% endif %}>
+                    <input type="hidden"
+                           name="q_{{ item.question.id }}_longitude"
+                           id="lng_{{ item.question.id }}">
+
+                    <button type="button" class="camera-btn w-100" id="btn_location_{{ item.question.id }}" onclick="getCurrentLocation('{{ item.question.id }}')">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M8 16s6-5.686 6-10A6 6 0 0 0 2 6c0 4.314 6 10 6 10zm0-7a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/>
+                        </svg>
+                        <span class="camera-text" id="location_text_{{ item.question.id }}">KONUM AL</span>
+                    </button>
+
+                    <div id="preview_location_area_{{ item.question.id }}" class="preview-container" style="display:none;">
+                        <div class="d-flex align-items-center">
+                            <div class="text-center">
+                                <i class="fas fa-map-marker-alt text-success" style="font-size: 3rem;"></i>
+                            </div>
+                            <div class="ms-3 flex-grow-1">
+                                <h6 class="text-success mb-1 small fw-bold">
+                                    <i class="fas fa-check-circle"></i> Konum Alındı
+                                </h6>
+                                <p class="mb-0 small text-muted" id="location_coords_{{ item.question.id }}"></p>
+                                <button type="button" class="btn btn-sm btn-outline-warning w-100 mt-2" onclick="getCurrentLocation('{{ item.question.id }}')">
+                                    Yeniden Al
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             {% endif %}
 
             {# CHILD QUESTIONS - Parent question card'ının İÇİNDE render ediliyor #}
@@ -322,6 +405,89 @@
 
                 {% elif child.input_type == 'textarea' %}
                     <textarea name="q_{{ child.id }}" class="form-control p-3 survey-input child-input" rows="3" placeholder="Detaylı açıklama..." {% if child.required %}required{% endif %} oninput="checkProgress()"></textarea>
+
+                {% elif child.input_type == 'video' %}
+                    <div class="d-flex justify-content-end mb-2">
+                        <button type="button" class="photo-icon-btn" onclick="triggerVideo('{{ child.id }}')" aria-label="Video çek">
+                            <i class="fas fa-video"></i>
+                        </button>
+                    </div>
+
+                    <div class="photo-wrapper">
+                        <input type="file" 
+                               name="q_{{ child.id }}" 
+                               id="file_video_{{ child.id }}"
+                               class="invisible-input survey-input"
+                               accept="video/*"
+                               capture="camcorder"
+                               onchange="showVideoPreview(this, '{{ child.id }}')">
+                        <input type="hidden"
+                               name="q_{{ child.id }}_video"
+                               id="video_{{ child.id }}"
+                               {% if child.required %}data-required-video="1"{% endif %}>
+
+                        <label for="file_video_{{ child.id }}" class="camera-btn" id="btn_video_area_{{ child.id }}" onclick="startVideoPoll('{{ child.id }}')">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M0 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V6zm12-1a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2zM5 8.5a.5.5 0 1 0-1 0 .5.5 0 0 0 1 0z"/>
+                            </svg>
+                            <span class="camera-text">VİDEO ÇEK (Max 2 dk)</span>
+                        </label>
+
+                        <div id="preview_video_area_{{ child.id }}" class="preview-container" style="display:none;">
+                            <div class="d-flex align-items-center">
+                                <video id="video_preview_{{ child.id }}" src="" class="preview-img" controls style="max-width: 150px; max-height: 150px;"></video>
+                                <div class="ms-3 flex-grow-1">
+                                    <h6 class="text-success mb-1 small fw-bold">
+                                        <i class="fas fa-check-circle"></i> Video Yüklendi
+                                    </h6>
+                                    <label for="file_video_{{ child.id }}" class="btn btn-sm btn-outline-warning w-100">
+                                        Yeniden Çek
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                {% elif child.input_type == 'location' %}
+                    <div class="d-flex justify-content-end mb-2">
+                        <button type="button" class="photo-icon-btn" onclick="getCurrentLocation('{{ child.id }}')" aria-label="Konum Al">
+                            <i class="fas fa-map-marker-alt"></i>
+                        </button>
+                    </div>
+
+                    <div class="photo-wrapper">
+                        <input type="hidden"
+                               name="q_{{ child.id }}_latitude"
+                               id="lat_{{ child.id }}"
+                               {% if child.required %}data-required-location="1"{% endif %}>
+                        <input type="hidden"
+                               name="q_{{ child.id }}_longitude"
+                               id="lng_{{ child.id }}">
+
+                        <button type="button" class="camera-btn w-100" id="btn_location_{{ child.id }}" onclick="getCurrentLocation('{{ child.id }}')">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M8 16s6-5.686 6-10A6 6 0 0 0 2 6c0 4.314 6 10 6 10zm0-7a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/>
+                            </svg>
+                            <span class="camera-text" id="location_text_{{ child.id }}">KONUM AL</span>
+                        </button>
+
+                        <div id="preview_location_area_{{ child.id }}" class="preview-container" style="display:none;">
+                            <div class="d-flex align-items-center">
+                                <div class="text-center">
+                                    <i class="fas fa-map-marker-alt text-success" style="font-size: 3rem;"></i>
+                                </div>
+                                <div class="ms-3 flex-grow-1">
+                                    <h6 class="text-success mb-1 small fw-bold">
+                                        <i class="fas fa-check-circle"></i> Konum Alındı
+                                    </h6>
+                                    <p class="mb-0 small text-muted" id="location_coords_{{ child.id }}"></p>
+                                    <button type="button" class="btn btn-sm btn-outline-warning w-100 mt-2" onclick="getCurrentLocation('{{ child.id }}')">
+                                        Yeniden Al
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
                 {% elif child.input_type == 'number' %}
                     <input type="number" name="q_{{ child.id }}" class="form-control p-3 survey-input child-input" placeholder="0" {% if child.required %}required{% endif %} oninput="checkProgress()">
@@ -599,19 +765,157 @@
         }
     }
 
+    // Video Çekme Fonksiyonu
+    function triggerVideo(id) {
+        const inp = document.getElementById('file_video_' + id);
+        if (!inp) return;
+        startVideoPoll(id);
+        inp.click();
+    }
+
+    // Video Dosyası Polling (mobil uygulamalar için)
+    function startVideoPoll(id) {
+        const inp = document.getElementById('file_video_' + id);
+        if (!inp) return;
+        
+        let attempts = 0;
+        const maxAttempts = 20;
+        const pollInterval = setInterval(function() {
+            attempts++;
+            if (inp.files && inp.files.length > 0) {
+                clearInterval(pollInterval);
+                showVideoPreview(inp, id);
+            } else if (attempts >= maxAttempts) {
+                clearInterval(pollInterval);
+            }
+        }, 300);
+    }
+
+    // Video Önizleme
+    function showVideoPreview(input, id) {
+        if (input.files && input.files[0]) {
+            const file = input.files[0];
+            
+            // Video dosya boyutu kontrolü (max ~50MB, yaklaşık 2 dakika için yeterli)
+            const maxSize = 50 * 1024 * 1024; // 50MB
+            if (file.size > maxSize) {
+                alert('Video dosyası çok büyük. Lütfen 2 dakikadan kısa bir video çekin.');
+                input.value = '';
+                return;
+            }
+
+            const videoPreview = document.getElementById('video_preview_' + id);
+            const previewArea = document.getElementById('preview_video_area_' + id);
+            const btnArea = document.getElementById('btn_video_area_' + id);
+            const videoInput = document.getElementById('video_' + id);
+
+            if (videoPreview && file) {
+                const url = URL.createObjectURL(file);
+                videoPreview.src = url;
+                previewArea.style.display = 'block';
+                if (btnArea) btnArea.style.display = 'none';
+                if (videoInput) {
+                    // Video dosyasını base64'e çevirme (çok büyük olabilir, sadece flag olarak kullan)
+                    videoInput.value = 'video_selected';
+                }
+                checkProgress();
+            }
+        }
+    }
+
+    // Konum Alma Fonksiyonu
+    function getCurrentLocation(id) {
+        if (!navigator.geolocation) {
+            alert('Konum servisi desteklenmiyor. Lütfen tarayıcınızı güncelleyin.');
+            return;
+        }
+
+        const latInput = document.getElementById('lat_' + id);
+        const lngInput = document.getElementById('lng_' + id);
+        const previewArea = document.getElementById('preview_location_area_' + id);
+        const btnArea = document.getElementById('btn_location_' + id);
+        const coordsText = document.getElementById('location_coords_' + id);
+        const locationText = document.getElementById('location_text_' + id);
+
+        if (btnArea) {
+            btnArea.disabled = true;
+            if (locationText) locationText.textContent = 'Konum alınıyor...';
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            function(position) {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+
+                if (latInput) latInput.value = lat.toFixed(6);
+                if (lngInput) lngInput.value = lng.toFixed(6);
+                if (previewArea) previewArea.style.display = 'block';
+                if (btnArea) {
+                    btnArea.disabled = false;
+                    btnArea.style.display = 'none';
+                }
+                if (coordsText) {
+                    coordsText.textContent = `Enlem: ${lat.toFixed(6)}, Boylam: ${lng.toFixed(6)}`;
+                }
+                if (locationText) locationText.textContent = 'KONUM AL';
+
+                checkProgress();
+            },
+            function(error) {
+                if (btnArea) {
+                    btnArea.disabled = false;
+                    if (locationText) locationText.textContent = 'KONUM AL';
+                }
+                
+                let errorMsg = 'Konum alınamadı. ';
+                switch(error.code) {
+                    case error.PERMISSION_DENIED:
+                        errorMsg += 'Konum izni verilmedi. Lütfen tarayıcı ayarlarından konum izni verin.';
+                        break;
+                    case error.POSITION_UNAVAILABLE:
+                        errorMsg += 'Konum bilgisi alınamadı.';
+                        break;
+                    case error.TIMEOUT:
+                        errorMsg += 'Konum alma işlemi zaman aşımına uğradı.';
+                        break;
+                    default:
+                        errorMsg += 'Bilinmeyen bir hata oluştu.';
+                        break;
+                }
+                alert(errorMsg);
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 0
+            }
+        );
+    }
+
     // İlerleme Çubuğu Kontrolü
     function checkProgress() {
-        // required (text/select/textarea vs) + required photo (data-required-photo)
-        var requiredInputs = document.querySelectorAll('[required], [data-required-photo="1"]');
+        // required (text/select/textarea vs) + required photo (data-required-photo) + required video (data-required-video) + required location (data-required-location)
+        var requiredInputs = document.querySelectorAll('[required], [data-required-photo="1"], [data-required-video="1"], [data-required-location="1"]');
         var total = requiredInputs.length;
         var filled = 0;
 
         requiredInputs.forEach(function(inp) {
             if (inp.tagName === 'INPUT' && inp.type === 'file') {
-                // burada file input artık required değil, ama yine de güvenli kalsın
+                // Video veya fotoğraf dosyası kontrolü
                 if (inp.files && inp.files.length > 0) filled++;
-            } else if (inp.tagName === 'INPUT' && inp.type === 'hidden' && inp.getAttribute('data-required-photo') === '1') {
-                if (inp.value && inp.value.startsWith('data:image/')) filled++;
+            } else if (inp.tagName === 'INPUT' && inp.type === 'hidden') {
+                if (inp.getAttribute('data-required-photo') === '1') {
+                    // Fotoğraf kontrolü
+                    if (inp.value && inp.value.startsWith('data:image/')) filled++;
+                } else if (inp.getAttribute('data-required-video') === '1') {
+                    // Video kontrolü
+                    if (inp.value && inp.value === 'video_selected') filled++;
+                } else if (inp.getAttribute('data-required-location') === '1') {
+                    // Konum kontrolü (latitude varsa longitude de vardır)
+                    if (inp.value && inp.value.trim() !== '') filled++;
+                } else {
+                    if ((inp.value || '').trim() !== '') filled++;
+                }
             } else {
                 if ((inp.value || '').trim() !== '') filled++;
             }

@@ -70,3 +70,5 @@ python manage.py send_automated_emails
 - Görev her 5 dakikada bir çalışır, bu yüzden en fazla 5 dakika gecikme olabilir
 - Gönderim saatinden önce ayarlanırsa, saat geldiğinde otomatik gönderilir
 
+
+

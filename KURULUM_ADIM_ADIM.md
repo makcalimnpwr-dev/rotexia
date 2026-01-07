@@ -114,3 +114,5 @@ schtasks /query /tn "FieldOps_AutomatedEmails" /fo LIST /v
 
 **ÖNEMLİ:** Task Scheduler görevi kurulmadan otomatik mail gönderimi **ASLA çalışmaz!**
 
+
+

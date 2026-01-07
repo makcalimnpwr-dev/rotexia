@@ -10,16 +10,10 @@
             <form method="post">
                 {% csrf_token %}
 
-                {% if is_admin_panel and is_root_admin %}
-                <div class="mb-3">
-                    <label class="form-label fw-bold">Firma <span class="text-danger">*</span></label>
-                    <select name="tenant_id" class="form-select" required>
-                        <option value="">Firma seçin</option>
-                        {% for t in all_tenants %}
-                            <option value="{{ t.id }}">{{ t.name }}</option>
-                        {% endfor %}
-                    </select>
-                    <small class="text-muted">Admin panelde anket oluştururken hangi firmaya ait olacağını seçmelisiniz.</small>
+                {% if is_root_admin and is_admin_panel %}
+                <div class="alert alert-info mb-3">
+                    <i class="fas fa-info-circle me-2"></i>
+                    <strong>Rotexia'ya Özel:</strong> Bu anket sadece Rotexia sisteminde görünecek, diğer firmalarda görünmeyecek.
                 </div>
                 {% endif %}
 

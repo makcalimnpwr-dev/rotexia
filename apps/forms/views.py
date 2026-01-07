@@ -11,7 +11,7 @@ from apps.users.decorators import tenant_required
 # --- HATAYI ÇÖZEN SATIR ---
 from apps.customers.models import Customer, CustomerCari, CustomerFieldDefinition, CustomFieldDefinition
 # --------------------------
-from apps.core.tenant_utils import filter_by_tenant, set_tenant_on_save
+from apps.core.tenant_utils import filter_by_tenant, set_tenant_on_save, get_current_tenant
 from apps.core.models import Tenant
 
 # 1. ANKET LİSTESİ
@@ -32,7 +32,9 @@ def survey_list(request):
     # Admin panelindeyken tüm formları göster (tenant filtresi yok)
     base_qs = Survey.objects.all()
     if not (is_root_admin(request.user) and is_admin_panel_path):
+        # Normal kullanıcılar: Sadece kendi tenant'larına ait anketler (tenant=None olanlar Rotexia'ya özel, görünmez)
         base_qs = filter_by_tenant(base_qs, request)
+    # Rotexia admin panelde: Tüm anketler görünür (tenant=None olanlar da dahil)
     surveys = base_qs.order_by('-created_at')
     return render(request, 'forms/list.html', {'surveys': surveys})
 
@@ -55,28 +57,37 @@ def survey_create(request):
         desc = request.POST.get('description')
         if title:
             survey = Survey(title=title, description=desc)
-            # Root admin admin panelde tenant yok → firmayı formdan seçtir
+            # Rotexia superuser admin panelde: tenant=None (Rotexia'ya özel, diğer firmalarda görünmez)
+            # Normal kullanıcılar: Kendi tenant'larına ait
             if is_root_admin(request.user) and is_admin_panel_path:
-                tenant_id = (request.POST.get('tenant_id') or '').strip()
-                if not tenant_id.isdigit():
-                    messages.error(request, 'Lütfen firma seçin.')
-                    return redirect('survey_create')
-                tenant = Tenant.objects.filter(id=int(tenant_id), is_active=True).first()
-                if not tenant:
-                    messages.error(request, 'Seçilen firma bulunamadı.')
-                    return redirect('survey_create')
-                survey.tenant = tenant
+                # Rotexia'ya özel: tenant=None
+                survey.tenant = None
             else:
                 set_tenant_on_save(survey, request)
             survey.save()
             messages.success(request, 'Anket oluşturuldu, şimdi soruları ekleyin.')
             return redirect('survey_builder', pk=survey.id)
-    return render(request, 'forms/create.html')
+    
+    # Context hazırla
+    is_root = is_root_admin(request.user)
+    context = {
+        'is_root_admin': is_root,
+        'is_admin_panel': is_admin_panel_path,
+    }
+    return render(request, 'forms/create.html', context)
 
 # 3. ANKET SİLME
 @login_required
 def survey_delete(request, pk):
-    survey = get_object_or_404(filter_by_tenant(Survey.objects.all(), request), pk=pk)
+    from apps.users.utils import is_root_admin
+    
+    # Root admin her zaman tüm anketleri silebilir (Rotexia'ya özel dahil)
+    # Normal kullanıcılar sadece kendi tenant'larına ait anketleri silebilir (tenant=None olanlar görünmez)
+    if is_root_admin(request.user) and is_admin_panel_path:
+        survey = get_object_or_404(Survey.objects.all(), pk=pk)
+    else:
+        survey = get_object_or_404(filter_by_tenant(Survey.objects.all(), request), pk=pk)
+    
     survey.delete()
     messages.success(request, 'Anket silindi.')
     return redirect('survey_list')
@@ -84,7 +95,14 @@ def survey_delete(request, pk):
 # 4. SORU EKLEME
 @login_required
 def question_create(request, survey_id):
-    survey = get_object_or_404(filter_by_tenant(Survey.objects.all(), request), pk=survey_id)
+    from apps.users.utils import is_root_admin
+    
+    # Root admin her zaman tüm anketlere soru ekleyebilir (Rotexia'ya özel dahil)
+    # Normal kullanıcılar sadece kendi tenant'larına ait anketlere soru ekleyebilir (tenant=None olanlar görünmez)
+    if is_root_admin(request.user) and is_admin_panel_path:
+        survey = get_object_or_404(Survey.objects.all(), pk=survey_id)
+    else:
+        survey = get_object_or_404(filter_by_tenant(Survey.objects.all(), request), pk=survey_id)
     if request.method == 'POST':
         label = request.POST.get('label')
         input_type = request.POST.get('input_type')
@@ -189,7 +207,14 @@ def get_question_options(request, question_id):
 # 8. ANKET TASARIMCISI (BUILDER) - HATA VEREN FONKSİYON BUYDU
 @login_required
 def survey_builder(request, pk):
-    survey = get_object_or_404(filter_by_tenant(Survey.objects.all(), request), pk=pk)
+    from apps.users.utils import is_root_admin
+    
+    # Root admin her zaman tüm anketleri görebilir (Rotexia'ya özel dahil)
+    # Normal kullanıcılar sadece kendi tenant'larına ait anketleri görebilir (tenant=None olanlar görünmez)
+    if is_root_admin(request.user) and is_admin_panel_path:
+        survey = get_object_or_404(Survey.objects.all(), pk=pk)
+    else:
+        survey = get_object_or_404(filter_by_tenant(Survey.objects.all(), request), pk=pk)
     questions = survey.questions.all().order_by('order')
     
     # --- VERİLERİ ÇEK ---

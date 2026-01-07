@@ -97,3 +97,5 @@ Görev kurulduktan sonra, 21:06-21:11 arası (5 dakika tolerans) mail gönderile
 2. Görevin çalıştığını kontrol edin (Task Scheduler'da "Last Run Result")
 3. Manuel test edin: `python manage.py send_automated_emails`
 
+
+

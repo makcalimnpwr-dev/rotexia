@@ -54,6 +54,8 @@ class Question(models.Model):
         ('textarea', 'Uzun Yazı'),
         ('photo', 'Fotoğraf'),
         ('select', 'Seçim Kutusu'),
+        ('video', 'Video'),
+        ('location', 'Konum'),
     ]
 
     survey = models.ForeignKey(Survey, on_delete=models.CASCADE, related_name='questions')
@@ -107,6 +109,11 @@ class SurveyAnswer(models.Model):
     question = models.ForeignKey(Question, on_delete=models.CASCADE)
     answer_text = models.TextField(blank=True, null=True)
     answer_photo = models.ImageField(upload_to='survey_photos/', blank=True, null=True)
+    answer_video = models.FileField(upload_to='survey_videos/', blank=True, null=True, verbose_name="Video")
+    
+    # Konum Bilgileri (enlem, boylam)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True, verbose_name="Enlem")
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True, verbose_name="Boylam")
     
     # Multi-Tenancy: Her cevap bir tenant'a ait
     tenant = models.ForeignKey(

@@ -133,3 +133,5 @@ python test_send_email_now.py
 
 Her platform için detaylı bilgi ilgili dosyalarda mevcuttur.
 
+
+

@@ -47,6 +47,32 @@
                 </div>
             </div>
 
+            <!-- Superuser Bilgileri -->
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-header bg-warning text-dark">
+                    <h5 class="m-0"><i class="fas fa-user-shield me-2"></i> Firma Superuser Bilgileri</h5>
+                    <small class="text-muted">Bu kullanıcı tüm yetkilere sahiptir ve otomatik oluşturulmuştur</small>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Kullanıcı Adı <span class="text-danger">*</span></label>
+                            <input type="text" name="superuser_username" class="form-control" value="{{ tenant.superuser_username }}" required>
+                            <small class="text-muted">Bu firmaya giriş yapmak için kullanılacak kullanıcı adı</small>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Şifre</label>
+                            <input type="password" name="superuser_password" class="form-control" placeholder="Yeni şifre (boş bırakırsanız değişmez)" autocomplete="new-password">
+                            <small class="text-muted">Mevcut Şifre: <code>{{ tenant.superuser_plain_password }}</code></small>
+                        </div>
+                    </div>
+                    <div class="alert alert-info mb-0">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Not:</strong> Bu kullanıcı ile firmaya giriş yapmak için ana sayfadan firma adını girin ve bu bilgilerle giriş yapın.
+                    </div>
+                </div>
+            </div>
+
             <!-- Menü Ayarları -->
             <div class="card shadow-sm border-0 mb-4">
                 <div class="card-header bg-info text-white">

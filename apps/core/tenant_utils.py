@@ -71,9 +71,10 @@ def get_current_tenant(request):
             from apps.users.utils import is_root_admin
             if not is_root_admin(request.user):
                 # Normal kullanıcı için ilk aktif tenant'ı al (sadece geliştirme için)
-                tenant = Tenant.objects.filter(is_active=True).first()
-                if tenant:
-                    request.session['tenant_id'] = tenant.id
+                # tenant = Tenant.objects.filter(is_active=True).first()
+                # if tenant:
+                #     request.session['tenant_id'] = tenant.id
+                pass
         except:
             pass
     

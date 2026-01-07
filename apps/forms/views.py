@@ -12,6 +12,7 @@ from apps.users.decorators import tenant_required
 from apps.customers.models import Customer, CustomerCari, CustomerFieldDefinition, CustomFieldDefinition
 # --------------------------
 from apps.core.tenant_utils import filter_by_tenant, set_tenant_on_save
+from apps.core.models import Tenant
 
 # 1. ANKET LİSTESİ
 @login_required
@@ -29,21 +30,44 @@ def survey_list(request):
     )
     
     # Admin panelindeyken tüm formları göster (tenant filtresi yok)
-    if is_root_admin(request.user) and is_admin_panel_path:
-        surveys = Survey.objects.all().order_by('-created_at')
-    else:
-        surveys = filter_by_tenant(Survey.objects.all(), request).order_by('-created_at')
+    base_qs = Survey.objects.all()
+    if not (is_root_admin(request.user) and is_admin_panel_path):
+        base_qs = filter_by_tenant(base_qs, request)
+    surveys = base_qs.order_by('-created_at')
     return render(request, 'forms/list.html', {'surveys': surveys})
 
 # 2. YENİ ANKET OLUŞTURMA
 @login_required
 def survey_create(request):
+    from apps.users.utils import is_root_admin
+
+    is_admin_panel_path = (
+        request.path.startswith('/admin-home') or
+        request.path.startswith('/admin/') or
+        request.path.startswith('/admin-panel/') or
+        request.path.startswith('/admin-login') or
+        'admin_mode=1' in request.GET or
+        'admin_mode=1' in request.META.get('QUERY_STRING', '')
+    )
+
     if request.method == 'POST':
         title = request.POST.get('title')
         desc = request.POST.get('description')
         if title:
             survey = Survey(title=title, description=desc)
-            set_tenant_on_save(survey, request)
+            # Root admin admin panelde tenant yok → firmayı formdan seçtir
+            if is_root_admin(request.user) and is_admin_panel_path:
+                tenant_id = (request.POST.get('tenant_id') or '').strip()
+                if not tenant_id.isdigit():
+                    messages.error(request, 'Lütfen firma seçin.')
+                    return redirect('survey_create')
+                tenant = Tenant.objects.filter(id=int(tenant_id), is_active=True).first()
+                if not tenant:
+                    messages.error(request, 'Seçilen firma bulunamadı.')
+                    return redirect('survey_create')
+                survey.tenant = tenant
+            else:
+                set_tenant_on_save(survey, request)
             survey.save()
             messages.success(request, 'Anket oluşturuldu, şimdi soruları ekleyin.')
             return redirect('survey_builder', pk=survey.id)

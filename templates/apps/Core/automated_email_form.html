@@ -1,0 +1,282 @@
+{% extends 'base.html' %}
+{% load custom_tags %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>
+        <i class="fas fa-envelope me-2"></i>
+        {% if automated_email %}Otomatik Mail Düzenle{% else %}Yeni Otomatik Mail Oluştur{% endif %}
+    </h2>
+    <a href="{% url 'automated_email_list' %}" class="btn btn-secondary">
+        <i class="fas fa-arrow-left me-2"></i> Geri Dön
+    </a>
+</div>
+
+<form method="post" class="needs-validation" novalidate>
+    {% csrf_token %}
+
+    {% if is_admin_automated_email and not automated_email %}
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-secondary text-white">
+            <h5 class="mb-0"><i class="fas fa-building me-2"></i>Firma Seçimi</h5>
+        </div>
+        <div class="card-body">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-8">
+                    <label class="form-label fw-bold">Firma <span class="text-danger">*</span></label>
+                    <select class="form-select" name="tenant_id" required>
+                        <option value="">Seçiniz</option>
+                        {% for t in tenants %}
+                            <option value="{{ t.id }}" {% if selected_tenant and selected_tenant.id == t.id %}selected{% endif %}>{{ t.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <small class="text-muted">Admin panelde otomatik mail oluştururken firmayı burada seçersiniz.</small>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% elif selected_tenant %}
+        <input type="hidden" name="tenant_id" value="{{ selected_tenant.id }}">
+    {% endif %}
+    
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0"><i class="fas fa-envelope me-2"></i>Mail Bilgileri</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label for="to_email" class="form-label">Kime <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="to_email" name="to_email" 
+                           value="{% if automated_email %}{{ automated_email.to_email }}{% endif %}" 
+                           placeholder="email@example.com, email2@example.com" required>
+                    <small class="form-text text-muted">Virgülle ayırarak birden fazla e-posta adresi ekleyebilirsiniz</small>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label for="cc_email" class="form-label">CC</label>
+                    <input type="text" class="form-control" id="cc_email" name="cc_email" 
+                           value="{% if automated_email %}{{ automated_email.cc_email }}{% endif %}" 
+                           placeholder="email@example.com, email2@example.com">
+                    <small class="form-text text-muted">Virgülle ayırarak birden fazla e-posta adresi ekleyebilirsiniz</small>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label for="subject" class="form-label">Konu <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="subject" name="subject" 
+                       value="{% if automated_email %}{{ automated_email.subject }}{% endif %}" required>
+            </div>
+            <div class="mb-3">
+                <label for="body" class="form-label">Mail İçeriği <span class="text-danger">*</span></label>
+                <textarea class="form-control" id="body" name="body" rows="5" required>{% if automated_email %}{{ automated_email.body }}{% endif %}</textarea>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-info text-white">
+            <h5 class="mb-0"><i class="fas fa-chart-bar me-2"></i>Raporlar</h5>
+        </div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label fw-bold">Gönderilecek Raporlar <span class="text-danger">*</span></label>
+                <div class="border rounded p-3" style="max-height: 400px; overflow-y: auto;">
+                    {% for report in available_reports %}
+                        {% if report.type == 'group' %}
+                            {# Grup raporlar (collapse yapısı) #}
+                            <div class="mb-3">
+                                <div class="d-flex align-items-center mb-2">
+                                    <button class="btn btn-sm btn-link text-decoration-none p-0 me-2" type="button" 
+                                            data-bs-toggle="collapse" data-bs-target="#collapse_{{ report.key }}" 
+                                            aria-expanded="false" aria-controls="collapse_{{ report.key }}">
+                                        <i class="fas fa-chevron-down"></i>
+                                    </button>
+                                    <label class="form-check-label fw-bold mb-0" style="cursor: pointer;"
+                                           onclick="document.querySelector('[data-bs-target=\'#collapse_{{ report.key }}\']').click()">
+                                        {{ report.name }}
+                                    </label>
+                                </div>
+                                <div class="collapse ms-4" id="collapse_{{ report.key }}">
+                                    <div class="border-start border-2 border-primary ps-3">
+                                        {% for child in report.children %}
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" type="checkbox" name="selected_reports" 
+                                                   value="{{ child.key }}" id="report_{{ child.key }}"
+                                                   {% if automated_email and automated_email.selected_reports|get_item:child.key %}checked{% endif %}>
+                                            <label class="form-check-label" for="report_{{ child.key }}">
+                                                <strong>{{ child.name }}</strong>
+                                                {% if child.description %}
+                                                <br>
+                                                <small class="text-muted">{{ child.description }}</small>
+                                                {% endif %}
+                                            </label>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            </div>
+                        {% else %}
+                            {# Tek raporlar #}
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" name="selected_reports" 
+                                       value="{{ report.key }}" id="report_{{ report.key }}"
+                                       {% if automated_email and automated_email.selected_reports|get_item:report.key %}checked{% endif %}>
+                                <label class="form-check-label" for="report_{{ report.key }}">
+                                    <strong>{{ report.name }}</strong>
+                                    {% if report.description %}
+                                    <br>
+                                    <small class="text-muted">{{ report.description }}</small>
+                                    {% endif %}
+                                </label>
+                            </div>
+                        {% endif %}
+                    {% empty %}
+                        <div class="alert alert-warning mb-0">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            Henüz rapor bulunmuyor.
+                        </div>
+                    {% endfor %}
+                </div>
+                <small class="form-text text-muted">
+                    <i class="fas fa-info-circle me-1"></i>
+                    Raporların altındaki tüm raporlar seçilebilir. Grup raporların altındaki raporları görmek için yanındaki ok işaretine tıklayın.
+                </small>
+            </div>
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="merge_reports" id="merge_reports"
+                           {% if automated_email and automated_email.merge_reports %}checked{% endif %}>
+                    <label class="form-check-label" for="merge_reports">
+                        <strong>Raporları Birleştir</strong>
+                        <br>
+                        <small class="text-muted">İşaretlenirse tüm raporlar tek Excel dosyasında sheet olarak gönderilir. İşaretlenmezse her rapor ayrı Excel dosyası olarak gönderilir.</small>
+                    </label>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label for="report_start_date" class="form-label">Rapor Başlangıç Tarihi <span class="text-danger">*</span></label>
+                    <input type="date" class="form-control" id="report_start_date" name="report_start_date" 
+                           value="{% if automated_email %}{{ automated_email.report_start_date|date:'Y-m-d' }}{% endif %}" required>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label for="report_end_date" class="form-label">Rapor Bitiş Tarihi <span class="text-danger">*</span></label>
+                    <input type="date" class="form-control" id="report_end_date" name="report_end_date" 
+                           value="{% if automated_email %}{{ automated_email.report_end_date|date:'Y-m-d' }}{% endif %}" required>
+                </div>
+            </div>
+            <small class="form-text text-muted">Seçilen raporların bu tarihler arasındaki verileri gönderilecektir</small>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-success text-white">
+            <h5 class="mb-0"><i class="fas fa-calendar-alt me-2"></i>Gönderim Ayarları</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label for="send_start_date" class="form-label">Gönderim Başlangıç Tarihi <span class="text-danger">*</span></label>
+                    <input type="date" class="form-control" id="send_start_date" name="send_start_date" 
+                           value="{% if automated_email %}{{ automated_email.send_start_date|date:'Y-m-d' }}{% endif %}" required>
+                    <small class="form-text text-muted">Hangi tarihte gönderilmeye başlansın</small>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label for="send_end_date" class="form-label">Gönderim Bitiş Tarihi</label>
+                    <input type="date" class="form-control" id="send_end_date" name="send_end_date" 
+                           value="{% if automated_email and automated_email.send_end_date %}{{ automated_email.send_end_date|date:'Y-m-d' }}{% endif %}">
+                    <small class="form-text text-muted">Mail gönderiminin son tarihi (opsiyonel - boş bırakılırsa sınırsız)</small>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label for="period" class="form-label">Periyot Seçeneği <span class="text-danger">*</span></label>
+                    <select class="form-select" id="period" name="period" required onchange="updateDayOptions()">
+                        <option value="">Seçiniz</option>
+                        <option value="daily" {% if automated_email and automated_email.period == 'daily' %}selected{% endif %}>Her Gün</option>
+                        <option value="weekly" {% if automated_email and automated_email.period == 'weekly' %}selected{% endif %}>Her Hafta</option>
+                        <option value="monthly" {% if automated_email and automated_email.period == 'monthly' %}selected{% endif %}>Her Ay</option>
+                    </select>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label for="day_option" class="form-label">Hangi Gün <span class="text-danger">*</span></label>
+                    <select class="form-select" id="day_option" name="day_option" required>
+                        <option value="">Seçiniz</option>
+                        <option value="every_day" {% if automated_email and automated_email.day_option == 'every_day' %}selected{% endif %}>Her Gün</option>
+                        <option value="monday" {% if automated_email and automated_email.day_option == 'monday' %}selected{% endif %}>Her Pazartesi</option>
+                        <option value="first_of_month" {% if automated_email and automated_email.day_option == 'first_of_month' %}selected{% endif %}>Her Ayın İlk Günü</option>
+                    </select>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label for="send_time" class="form-label">Saat <span class="text-danger">*</span></label>
+                    <input type="time" class="form-control" id="send_time" name="send_time" 
+                           value="{% if automated_email %}{{ automated_email.send_time|time:'H:i' }}{% else %}22:00{% endif %}" required>
+                    <small class="form-text text-muted">Raporun gönderileceği saat (örn: 22:00)</small>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-12 mb-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="is_active" id="is_active"
+                               {% if automated_email and automated_email.is_active %}checked{% elif not automated_email %}checked{% endif %}>
+                        <label class="form-check-label" for="is_active">
+                            <strong>Aktif</strong>
+                            <br>
+                            <small class="text-muted">İşaretlenirse otomatik mail gönderilir. İşaretlenmezse mail gönderilmez.</small>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-end gap-2">
+        <a href="{% url 'automated_email_list' %}" class="btn btn-secondary">
+            <i class="fas fa-times me-2"></i> İptal
+        </a>
+        <button type="submit" class="btn btn-primary">
+            <i class="fas fa-save me-2"></i> Kaydet
+        </button>
+    </div>
+</form>
+
+<script>
+function updateDayOptions() {
+    const period = document.getElementById('period').value;
+    const dayOption = document.getElementById('day_option');
+    
+    // Tüm seçenekleri göster
+    dayOption.querySelectorAll('option').forEach(opt => {
+        opt.style.display = '';
+    });
+    
+    // Periyoda göre filtrele
+    if (period === 'daily') {
+        dayOption.querySelector('option[value="monday"]').style.display = 'none';
+        dayOption.querySelector('option[value="first_of_month"]').style.display = 'none';
+        if (dayOption.value === 'monday' || dayOption.value === 'first_of_month') {
+            dayOption.value = 'every_day';
+        }
+    } else if (period === 'weekly') {
+        dayOption.querySelector('option[value="every_day"]').style.display = 'none';
+        dayOption.querySelector('option[value="first_of_month"]').style.display = 'none';
+        if (dayOption.value === 'every_day' || dayOption.value === 'first_of_month') {
+            dayOption.value = 'monday';
+        }
+    } else if (period === 'monthly') {
+        dayOption.querySelector('option[value="every_day"]').style.display = 'none';
+        dayOption.querySelector('option[value="monday"]').style.display = 'none';
+        if (dayOption.value === 'every_day' || dayOption.value === 'monday') {
+            dayOption.value = 'first_of_month';
+        }
+    }
+}
+
+// Sayfa yüklendiğinde çalıştır
+document.addEventListener('DOMContentLoaded', function() {
+    updateDayOptions();
+});
+</script>
+{% endblock %}
+

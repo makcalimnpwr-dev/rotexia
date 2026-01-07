@@ -89,8 +89,8 @@ def user_list(request):
     else:
         # Normal mod: tenant filtresi uygula
         users = filter_by_tenant(CustomUser.objects.all(), request).order_by('-date_joined')
-        # BU SATIR SAYESİNDE FİLTRE KUTUSU HER ZAMAN GÜNCEL OLUR
-        roles = filter_by_tenant(UserRole.objects.all(), request) 
+    # BU SATIR SAYESİNDE FİLTRE KUTUSU HER ZAMAN GÜNCEL OLUR
+    roles = filter_by_tenant(UserRole.objects.all(), request) 
 
     # ... filtreleme kodları (search, role_filter vb.) ...
     search_query = request.GET.get('search', '')
@@ -169,7 +169,6 @@ def add_user(request):
     })
 
 @login_required
-@root_admin_required
 def edit_user(request, pk):
     # Tenant kontrolü
     from apps.core.tenant_utils import get_current_tenant
@@ -190,14 +189,29 @@ def edit_user(request, pk):
     if not tenant:
         tenant = get_current_tenant(request)
     
-    if not is_root_admin(request.user):
-        user = get_object_or_404(filter_by_tenant(CustomUser.objects.all(), request), pk=pk)
+    # Tenant admin kontrolü: authority='Admin' ve kendi tenant'ındaki kullanıcılar
+    is_tenant_admin = (
+        hasattr(request.user, 'authority') and 
+        request.user.authority == 'Admin' and
+        hasattr(request.user, 'tenant') and
+        request.user.tenant == tenant and
+        tenant is not None
+    )
+    
+    if is_root_admin(request.user):
+        # Root admin herkesi düzenleyebilir
+        user = get_object_or_404(CustomUser.objects.all(), pk=pk)
+    elif is_tenant_admin:
+        # Tenant admin sadece kendi tenant'ındaki kullanıcıları düzenleyebilir
+        user = get_object_or_404(CustomUser.objects.filter(tenant=tenant), pk=pk)
         # Ekstra güvenlik: Tenant kontrolü
         if hasattr(user, 'tenant') and user.tenant != tenant:
             messages.error(request, "Bu kullanıcıyı düzenleme yetkiniz yok.")
             return redirect('user_list')
     else:
-        user = get_object_or_404(CustomUser.objects.all(), pk=pk)
+        # Normal kullanıcı: düzenleme yetkisi yok
+        messages.error(request, "Bu sayfaya erişim yetkiniz yok. Sadece Admin kullanıcıları kullanıcı düzenleyebilir.")
+        return redirect('user_list')
 
     # Root admin düzenlenemez (hiyerarşi tutarlılığı için)
     if is_root_admin(user):
@@ -215,7 +229,14 @@ def edit_user(request, pk):
     
     if request.method == 'POST':
         # Silmeden önce tekrar tenant kontrolü
-        if not is_root_admin(request.user) and hasattr(user, 'tenant') and user.tenant != tenant:
+        is_tenant_admin_post = (
+            hasattr(request.user, 'authority') and 
+            request.user.authority == 'Admin' and
+            hasattr(request.user, 'tenant') and
+            request.user.tenant == tenant and
+            tenant is not None
+        )
+        if not is_root_admin(request.user) and not is_tenant_admin_post and hasattr(user, 'tenant') and user.tenant != tenant:
             messages.error(request, "Bu kullanıcıyı düzenleme yetkiniz yok.")
             return redirect('user_list')
         
@@ -224,7 +245,14 @@ def edit_user(request, pk):
             user = form.save(commit=False)
             
             # Tenant'ı koru (değiştirilmesin)
-            if not is_root_admin(request.user) and tenant:
+            is_tenant_admin_save = (
+                hasattr(request.user, 'authority') and 
+                request.user.authority == 'Admin' and
+                hasattr(request.user, 'tenant') and
+                request.user.tenant == tenant and
+                tenant is not None
+            )
+            if not is_root_admin(request.user) and not is_tenant_admin_save and tenant:
                 user.tenant = tenant
             
             # Özel alanları extra_data'ya kaydet
@@ -459,7 +487,7 @@ def hierarchy(request):
         if not tenant and not is_root:
             messages.error(request, 'Firma seçimi yapılmamış!')
             return redirect('home')
-        qs = filter_by_tenant(AuthorityNode.objects.select_related('assigned_user'), request).order_by('sort_order', 'id')
+    qs = filter_by_tenant(AuthorityNode.objects.select_related('assigned_user'), request).order_by('sort_order', 'id')
     all_nodes = list(qs.values(
         'id', 'authority', 'parent_id', 'sort_order', 'label',
         'assigned_user_id', 'assigned_user__first_name', 'assigned_user__last_name', 'assigned_user__user_code'

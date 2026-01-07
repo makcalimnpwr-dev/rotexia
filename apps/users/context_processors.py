@@ -49,7 +49,7 @@ def user_permissions(request):
         else:
             # Normal kullanıcılar için izinleri çek
             tenant = get_current_tenant(request)
-            
+        
             if tenant:
                 # Bu tenant için kullanıcının izinlerini al
                 user_perms = UserMenuPermission.objects.filter(user=user, tenant=tenant)
@@ -65,7 +65,7 @@ def user_permissions(request):
             hasattr(user, 'authority') and user.authority == 'Admin' and
             hasattr(user, 'tenant') and user.tenant is not None
         )
-    
+
     return {
         "is_root_admin": is_root,
         "is_tenant_admin": is_tenant_admin,

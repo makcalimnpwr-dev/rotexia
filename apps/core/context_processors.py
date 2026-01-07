@@ -64,7 +64,7 @@ def tenant_context(request):
         request.tenant = None
         # Admin panelindeyken her zaman tenant session bilgilerini temizle
         for key in ['tenant_id', 'connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel']:
-            request.session.pop(key, None)
+                request.session.pop(key, None)
     else:
         # Subdomain yok ve admin panel path'i değilse
         # Eğer root admin ise ve tenant yoksa admin panelinde olabilir

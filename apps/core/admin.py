@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import SiteSetting, SystemSetting, Tenant, Plan, Subscription
+from .models import SiteSetting, SystemSetting, Tenant, Plan, Subscription, AutomatedEmail
 
 
 @admin.register(SiteSetting)
@@ -109,6 +109,33 @@ class SubscriptionAdmin(admin.ModelAdmin):
         }),
         ('Metadata', {
             'fields': ('created_at',),
+            'classes': ('collapse',)
+        }),
+    )
+
+
+@admin.register(AutomatedEmail)
+class AutomatedEmailAdmin(admin.ModelAdmin):
+    list_display = ['subject', 'tenant', 'is_active', 'period', 'send_time', 'last_sent_at', 'created_at']
+    list_filter = ['is_active', 'period', 'tenant', 'created_at']
+    search_fields = ['subject', 'to_email', 'tenant__name']
+    readonly_fields = ['created_at', 'updated_at', 'last_sent_at']
+    
+    fieldsets = (
+        ('Temel Bilgiler', {
+            'fields': ('tenant', 'is_active', 'created_by')
+        }),
+        ('Mail Bilgileri', {
+            'fields': ('to_email', 'cc_email', 'subject', 'body')
+        }),
+        ('Rapor Ayarları', {
+            'fields': ('selected_reports', 'merge_reports', 'report_start_date', 'report_end_date')
+        }),
+        ('Gönderim Ayarları', {
+            'fields': ('send_start_date', 'send_end_date', 'period', 'day_option', 'send_time')
+        }),
+        ('Metadata', {
+            'fields': ('last_sent_at', 'created_at', 'updated_at'),
             'classes': ('collapse',)
         }),
     )

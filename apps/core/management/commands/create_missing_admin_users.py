@@ -87,3 +87,5 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f'\n📊 Özet: {created_count} yeni admin kullanıcısı oluşturuldu, {existing_count} admin kullanıcısı zaten mevcuttu.'))
 
 
+
+

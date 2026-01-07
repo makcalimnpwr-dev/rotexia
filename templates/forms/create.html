@@ -9,6 +9,20 @@
         <div class="card-body p-4">
             <form method="post">
                 {% csrf_token %}
+
+                {% if is_admin_panel and is_root_admin %}
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Firma <span class="text-danger">*</span></label>
+                    <select name="tenant_id" class="form-select" required>
+                        <option value="">Firma seçin</option>
+                        {% for t in all_tenants %}
+                            <option value="{{ t.id }}">{{ t.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <small class="text-muted">Admin panelde anket oluştururken hangi firmaya ait olacağını seçmelisiniz.</small>
+                </div>
+                {% endif %}
+
                 <div class="mb-3">
                     <label class="form-label fw-bold">Anket Başlığı</label>
                     <input type="text" name="title" class="form-control" placeholder="Örn: Raf Düzen Kontrolü" required>

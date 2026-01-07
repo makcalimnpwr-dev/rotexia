@@ -157,11 +157,18 @@
         background: #f8fbff;
         padding: 14px;
         border-radius: 10px;
-        margin-top: 10px;
-        display: none; /* koşul sağlanınca gösterilecek */
+        margin-top: 15px;
+        margin-left: 10px;
+        display: none !important; /* koşul sağlanınca gösterilecek - !important ile güçlendir */
+        opacity: 0;
+        max-height: 0;
+        overflow: hidden;
+        transition: opacity 0.3s ease, max-height 0.3s ease;
     }
     .child-question.show {
-        display: block;
+        display: block !important; /* !important ile güçlendir */
+        opacity: 1 !important;
+        max-height: 2000px !important;
     }
 </style>
 
@@ -235,7 +242,7 @@
                 <input type="text" name="q_{{ item.question.id }}" class="form-control p-3 survey-input" placeholder="Cevabınız..." {% if item.question.required %}required{% endif %} oninput="checkProgress()">
 
             {% elif item.question.input_type == 'select' %}
-                <select name="q_{{ item.question.id }}" class="form-select p-3 survey-input" {% if item.question.required %}required{% endif %} onchange="checkProgress()">
+                <select name="q_{{ item.question.id }}" id="q_{{ item.question.id }}" class="form-select p-3 survey-input parent-select" {% if item.question.required %}required{% endif %} onchange="handleChildQuestions('{{ item.question.id }}', this.value); checkProgress();">
                     <option value="">Seçiniz...</option>
                     {% for opt in item.options %}
                         <option value="{{ opt.text }}">{{ opt.text }}</option>
@@ -247,13 +254,12 @@
 
             {% endif %}
 
-        </div>
-
-        {% if item.child_questions %}
-            {% for child in item.child_questions %}
-            <div class="child-question" 
-                 data-parent-id="{{ child.parent_id }}" 
-                 data-trigger="{{ child.trigger_answer|default:'' }}">
+            {# CHILD QUESTIONS - Parent question card'ının İÇİNDE render ediliyor #}
+            {% if item.child_questions %}
+                {% for child in item.child_questions %}
+                <div class="child-question" 
+                     data-parent-id="{{ child.parent_id }}" 
+                     data-trigger="{{ child.trigger_answer|default:'' }}">
                 <label class="q-label" style="font-size: 0.95rem;">
                     <span class="badge bg-info me-2">Bağlı</span>
                     {{ child.label }} {% if child.required %}<span class="text-danger">*</span>{% endif %}
@@ -322,9 +328,11 @@
 
                 {% endif %}
 
-            </div>
-            {% endfor %}
-        {% endif %}
+                </div>
+                {% endfor %}
+            {% endif %}
+
+        </div>
         {% endfor %}
 
         <div class="fixed-bottom p-3 bg-white border-top shadow-lg" style="z-index: 1000;">
@@ -350,6 +358,44 @@
 </div>
 
 <script>
+    // Çocuk sorularını göster/gizle - En başta tanımla (inline onchange için gerekli)
+    function handleChildQuestions(parentId, value) {
+        console.log('[handleChildQuestions] Called with parentId:', parentId, 'value:', value);
+        const childQuestions = document.querySelectorAll('.child-question[data-parent-id="' + parentId + '"]');
+        console.log('[handleChildQuestions] Found', childQuestions.length, 'child questions');
+        childQuestions.forEach(function(el) {
+            const trigger = (el.getAttribute('data-trigger') || '').trim();
+            const shouldShow = trigger === '' || trigger.toLowerCase() === (value || '').toLowerCase();
+            
+            if (shouldShow) {
+                el.classList.add('show');
+            } else {
+                el.classList.remove('show');
+                // içindeki inputları temizle
+                el.querySelectorAll('input, textarea, select').forEach(function(inp) {
+                    if (inp.type === 'file') {
+                        inp.value = '';
+                        // önizlemeyi sıfırla
+                        const id = inp.id.replace('file_', '');
+                        if (typeof resetPhotoPreview === 'function') {
+                            resetPhotoPreview(id);
+                        }
+                    } else if (inp.type === 'radio' || inp.type === 'checkbox') {
+                        inp.checked = false;
+                    } else {
+                        inp.value = '';
+                    }
+                });
+            }
+        });
+    }
+    
+    // Global scope'a ekle (hemen erişilebilir olmalı)
+    window.handleChildQuestions = handleChildQuestions;
+    
+    // Test: Fonksiyonun yüklendiğini doğrula
+    console.log('[Script Init] handleChildQuestions function defined:', typeof window.handleChildQuestions === 'function');
+
     // Kamera dönüşünde bazı Android WebView/Chrome sürümleri `change` event'ini geç tetikleyebiliyor
     // veya `input.files` geç dolabiliyor. Bu yüzden kısa süre polling yapıyoruz.
     const __filePollTimers = {};
@@ -513,33 +559,6 @@
         triggerCamera(id);
     }
 
-    // Çocuk sorularını göster/gizle
-    function handleChildQuestions(parentId, value) {
-        document.querySelectorAll('.child-question[data-parent-id="'+parentId+'"]').forEach(function(el){
-            const trigger = (el.getAttribute('data-trigger') || '').trim();
-            const shouldShow = trigger === '' || trigger.toLowerCase() === (value || '').toLowerCase();
-            
-            if (shouldShow) {
-                el.classList.add('show');
-            } else {
-                el.classList.remove('show');
-                // içindeki inputları temizle
-                el.querySelectorAll('input, textarea, select').forEach(function(inp){
-                    if (inp.type === 'file') {
-                        inp.value = '';
-                        // önizlemeyi sıfırla
-                        const id = inp.id.replace('file_', '');
-                        resetPhotoPreview(id);
-                    } else if (inp.type === 'radio' || inp.type === 'checkbox') {
-                        inp.checked = false;
-                    } else {
-                        inp.value = '';
-                    }
-                });
-            }
-        });
-    }
-
     // Belirli fotoğraf önizlemesini sıfırla
     function resetPhotoPreview(id) {
         const btnArea = document.getElementById('btn_area_' + id);
@@ -615,17 +634,32 @@
         checkProgress();
 
         // Parent (select) değişince çocukları kontrol et
-        document.querySelectorAll('.question-card select').forEach(function(sel){
-            sel.addEventListener('change', function(){
-                const parentId = this.name.replace('q_', '');
-                handleChildQuestions(parentId, this.value);
-            });
-        });
-
-        // Sayfa ilk yüklenirken mevcut seçimi uygula
-        document.querySelectorAll('.question-card select').forEach(function(sel){
-            const parentId = sel.name.replace('q_', '');
-            handleChildQuestions(parentId, sel.value);
+        // Hem onchange attribute'u hem de event listener ekliyoruz (mobil browser uyumluluğu için)
+        document.querySelectorAll('.question-card select.parent-select').forEach(function(sel){
+            const parentId = sel.id ? sel.id.replace('q_', '') : sel.name.replace('q_', '');
+            
+            console.log('[DOMContentLoaded] Setting up listener for select:', sel.id || sel.name, 'parentId:', parentId);
+            
+            // Event listener ekle (ana mekanizma - inline onchange çalışmazsa bu çalışır)
+            sel.addEventListener('change', function(e){
+                const pid = this.id ? this.id.replace('q_', '') : this.name.replace('q_', '');
+                const val = this.value || '';
+                console.log('[Select change event] Parent ID:', pid, 'Value:', val);
+                if (window.handleChildQuestions) {
+                    window.handleChildQuestions(pid, val);
+                } else {
+                    console.error('[Select change event] handleChildQuestions function not found!');
+                }
+                checkProgress();
+            }, false); // useCapture: false
+            
+            // Sayfa ilk yüklenirken mevcut seçimi uygula
+            if (sel.value) {
+                console.log('[DOMContentLoaded] Initial value found:', sel.value);
+                if (window.handleChildQuestions) {
+                    window.handleChildQuestions(parentId, sel.value);
+                }
+            }
         });
 
         // File input'lara güvenli event dinleyicileri ekle

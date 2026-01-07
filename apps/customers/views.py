@@ -1,410 +1,480 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from django.http import HttpResponse
+from django.http import HttpResponseRedirect
 from django.db.models import Q
-from django.core.paginator import Paginator # Sayfalama Modülü
-from .models import Customer, CustomerCari, CustomFieldDefinition
-from .forms import CustomerForm, CariForm, CustomFieldForm
-from apps.users.hierarchy_access import get_hierarchy_scope_for_user
-from django.db.models import Q as DQ
-from apps.core.excel_utils import xlsx_from_rows, xlsx_to_rows
+from .models import Customer, CustomerCari, CustomerFieldDefinition, CustomFieldDefinition
 from apps.core.tenant_utils import filter_by_tenant, set_tenant_on_save, get_current_tenant
-from apps.users.utils import is_root_admin
-from apps.users.decorators import tenant_required
+import json
+import csv
+import openpyxl
+from datetime import datetime
+from django.utils.text import slugify
+import unicodedata
 
-# --- LİSTE VE SAYFALAMA ---
 @login_required
 def customer_list(request):
-    # Admin panel kontrolü - Admin panelindeyken tenant kontrolünü atla
-    is_admin_panel_path = (
-        request.path.startswith('/admin-home') or
-        request.path.startswith('/admin/') or
-        request.path.startswith('/admin-panel/') or
-        request.path.startswith('/admin-login') or
-        'admin_mode=1' in request.GET or
-        'admin_mode=1' in request.META.get('QUERY_STRING', '')
-    )
+    """Müşteri listesi ve filtreleme"""
+    search_query = request.GET.get('search', '')
+    sort = request.GET.get('sort', 'name_asc')
     
-    # 1. SIRALAMA (Mevcut Mantık)
-    sort_by = request.GET.get('sort', '-created_at')
-    direction = request.GET.get('dir', 'desc')
-    
-    valid_sort_fields = {'id': 'id', 'code': 'customer_code', 'name': 'name', 'cari': 'cari__name', 'city': 'city', 'district': 'district', 'auth': 'authorized_person'}
-    db_sort_field = valid_sort_fields.get(sort_by, '-created_at')
-    if direction == 'desc' and not db_sort_field.startswith('-'): db_sort_field = f'-{db_sort_field}'
-    
-    # 2. TEMEL SORGULAR
-    # Admin panelindeyken tüm müşterileri göster (tenant filtresi yok)
-    if is_root_admin(request.user) and is_admin_panel_path:
-        customer_qs = Customer.objects.all().order_by(db_sort_field)
+    # Sıralama
+    if sort == 'name_desc':
+        db_sort_field = '-name'
+    elif sort == 'created_desc':
+        db_sort_field = '-created_at'
+    elif sort == 'created_asc':
+        db_sort_field = 'created_at'
     else:
+        db_sort_field = 'name'
+        
+    # Filtreleme
+    if search_query:
+        customer_qs = filter_by_tenant(Customer.objects.all(), request).filter(
+            Q(name__icontains=search_query) | 
+            Q(email__icontains=search_query) |
+            Q(phone__icontains=search_query) |
+            Q(customer_code__icontains=search_query)
+        ).order_by(db_sort_field)
+    else:
+        # Tüm müşterileri getir
         customer_qs = filter_by_tenant(Customer.objects.all(), request).order_by(db_sort_field)
-
-    # Hiyerarşi bazlı filtre: Admin değilse sadece kendi/altının müşteri havuzu
-    scope = get_hierarchy_scope_for_user(request.user, include_self=True)
-    if scope.usernames:
-        customer_qs = customer_qs.filter(
-            DQ(visittask__merch_code__in=scope.usernames) | DQ(routeplan__merch_code__in=scope.usernames)
-        ).distinct()
-    cariler = CustomerCari.objects.all()
-    custom_fields = CustomFieldDefinition.objects.all() # Özel alan tanımları
-
-    # 3. GELİŞMİŞ FİLTRELEME (Her Sütun İçin Ayrı Filtre)
-    
-    # A. Standart Alan Filtreleri
-    f_search = request.GET.get('search', '')    # Genel Arama (Hala kalsın, hızlı arama için)
-    f_code = request.GET.get('f_code', '')      # Müşteri Kodu
-    f_name = request.GET.get('f_name', '')      # Müşteri Adı
-    f_cari = request.GET.get('f_cari', '')      # Cari ID
-    f_city = request.GET.get('f_city', '')      # İl
-    f_district = request.GET.get('f_district', '') # İlçe
-    f_auth = request.GET.get('f_auth', '')      # Yetkili
-    f_phone = request.GET.get('f_phone', '')    # Telefon
-
-    # Filtreleri Uygula
-    if f_search:
-        customer_qs = customer_qs.filter(Q(name__icontains=f_search) | Q(customer_code__icontains=f_search))
-    if f_code: customer_qs = customer_qs.filter(customer_code__icontains=f_code)
-    if f_name: customer_qs = customer_qs.filter(name__icontains=f_name)
-    if f_cari: customer_qs = customer_qs.filter(cari_id=f_cari)
-    if f_city: customer_qs = customer_qs.filter(city__icontains=f_city)
-    if f_district: customer_qs = customer_qs.filter(district__icontains=f_district)
-    if f_auth: customer_qs = customer_qs.filter(authorized_person__icontains=f_auth)
-    if f_phone: customer_qs = customer_qs.filter(phone__icontains=f_phone)
-
-    # B. Özel Alan Filtreleri (Dinamik)
-    # URL'den "custom_stant-tipi=123" gibi gelenleri yakalar
-    filter_values = {} # Şablonda kutucukların içi boşalmasın diye değerleri saklıyoruz
-    
-    for cf in custom_fields:
-        # Form elemanının adı: custom_slug (Örn: custom_stant-tipi)
-        val = request.GET.get(f"custom_{cf.slug}", '')
-        if val:
-            # JSONField içinde arama yap: extra_data__slug__icontains
-            filter_kwargs = {f"extra_data__{cf.slug}__icontains": val}
-            customer_qs = customer_qs.filter(**filter_kwargs)
-            filter_values[cf.slug] = val
-
-    # 4. SAYFALAMA
-    paginator = Paginator(customer_qs, 50)
-    page_number = request.GET.get('page')
-    customers_page = paginator.get_page(page_number)
-
+        
     context = {
-        'customers': customers_page,
-        'paginator': paginator,
-        'cariler': cariler,
-        'custom_fields': custom_fields,
-        
-        # Filtre Değerlerini Geri Gönder (Kutular silinmesin)
-        'f_search': f_search,
-        'f_code': f_code,
-        'f_name': f_name,
-        'f_cari': int(f_cari) if f_cari.isdigit() else '',
-        'f_city': f_city,
-        'f_district': f_district,
-        'f_auth': f_auth,
-        'f_phone': f_phone,
-        'filter_values': filter_values, # Özel alan değerleri
-        
-        'current_sort': sort_by,
-        'current_dir': direction
+        'customers': customer_qs,
+        'search_query': search_query,
+        'sort': sort,
+        'custom_fields': filter_by_tenant(CustomerFieldDefinition.objects.all(), request)
     }
     return render(request, 'apps/customers/customer_list.html', context)
-
-# --- YENİ ÖZEL ALAN EKLEME ---
-@login_required
-def add_custom_field(request):
-    if request.method == 'POST':
-        form = CustomFieldForm(request.POST)
-        if form.is_valid():
-            form.save()
-            messages.success(request, "Yeni alan tüm müşterilere eklendi.")
-        else:
-            messages.error(request, "Bu alan adı zaten var veya geçersiz.")
-    # Nereden geldiyse oraya dön (Listeye veya Detaya)
-    return redirect(request.META.get('HTTP_REFERER', 'customer_list'))
-
-# --- DİĞER STANDART İŞLEMLER (Öncekilerin Aynısı - Kısaltılmış) ---
-@login_required
-def bulk_customer_action(request):
-    if request.method == 'POST':
-        selected_ids = request.POST.getlist('selected_ids')
-        action_type = request.POST.get('action_type')
-        if not selected_ids: return redirect('customer_list')
-
-        if action_type == 'delete':
-            filter_by_tenant(Customer.objects.all(), request).filter(id__in=selected_ids).delete()
-            messages.success(request, "Silindi.")
-        elif action_type == 'bulk_edit':
-            target_field = request.POST.get('target_field')
-            new_value = request.POST.get('new_value')
-            if target_field == 'cari':
-                if new_value: filter_by_tenant(Customer.objects.all(), request).filter(id__in=selected_ids).update(cari_id=new_value)
-            else:
-                filter_by_tenant(Customer.objects.all(), request).filter(id__in=selected_ids).update(**{target_field: new_value})
-            messages.success(request, "Güncellendi.")
-    return redirect('customer_list')
 
 @login_required
 def add_customer(request):
     if request.method == 'POST':
-        form = CustomerForm(request.POST)
-        if form.is_valid():
-            customer = form.save(commit=False)
-            set_tenant_on_save(customer, request)
+        name = request.POST.get('name')
+        email = request.POST.get('email')
+        phone = request.POST.get('phone')
+        address = request.POST.get('address')
+        city = request.POST.get('city')
+        district = request.POST.get('district')
+        customer_code = request.POST.get('customer_code')
+        
+        customer = Customer(
+            name=name,
+            email=email,
+            phone=phone,
+            address=address,
+            city=city,
+            district=district,
+            customer_code=customer_code
+        )
+        set_tenant_on_save(customer, request)
+        customer.save()
+        
+        # Özel alanları kaydet
+        custom_data = {}
+        for field in filter_by_tenant(CustomerFieldDefinition.objects.all(), request):
+            value = request.POST.get(f'custom_field_{field.id}')
+            if value:
+                custom_data[field.name] = value
+        
+        if custom_data:
+            customer.custom_data = custom_data
             customer.save()
-            messages.success(request, "Müşteri eklendi.")
-            return redirect('customer_list')
-    else: form = CustomerForm()
-    return render(request, 'apps/customers/add_customer.html', {'form': form})
+            
+        messages.success(request, 'Müşteri başarıyla eklendi.')
+        return redirect('customer_list')
+        
+    return render(request, 'apps/customers/add_customer.html', {
+        'custom_fields': filter_by_tenant(CustomerFieldDefinition.objects.all(), request)
+    })
 
 @login_required
 def edit_customer(request, pk):
     customer = get_object_or_404(filter_by_tenant(Customer.objects.all(), request), pk=pk)
+    
     if request.method == 'POST':
-        form = CustomerForm(request.POST, instance=customer)
-        if form.is_valid():
-            form.save()
-            messages.success(request, "Güncellendi.")
-            return redirect('customer_list')
-    else: form = CustomerForm(instance=customer)
-    return render(request, 'apps/customers/add_customer.html', {'form': form, 'title': f"{customer.name} - Düzenle"})
+        customer.name = request.POST.get('name')
+        customer.email = request.POST.get('email')
+        customer.phone = request.POST.get('phone')
+        customer.address = request.POST.get('address')
+        customer.city = request.POST.get('city')
+        customer.district = request.POST.get('district')
+        customer.customer_code = request.POST.get('customer_code')
+        
+        # Özel alanları güncelle
+        custom_data = customer.custom_data or {}
+        for field in filter_by_tenant(CustomerFieldDefinition.objects.all(), request):
+            value = request.POST.get(f'custom_field_{field.id}')
+            if value:
+                custom_data[field.name] = value
+            elif field.name in custom_data: # Değer silindiyse
+                del custom_data[field.name]
+                
+        customer.custom_data = custom_data
+        customer.save()
+        
+        messages.success(request, 'Müşteri bilgileri güncellendi.')
+        return redirect('customer_list')
+        
+    return render(request, 'apps/customers/add_customer.html', {
+        'customer': customer,
+        'is_edit': True,
+        'custom_fields': filter_by_tenant(CustomerFieldDefinition.objects.all(), request)
+    })
 
 @login_required
 def delete_customer(request, pk):
-    # Tenant kontrolü - MUTLAKA yapılmalı
-    tenant = get_current_tenant(request)
-    if not tenant:
-        messages.error(request, "Firma seçimi yapılmamış. Lütfen bir firma seçin.")
-        return redirect('customer_list')
-    
-    # Sadece mevcut tenant'ın müşterilerini göster
-    customer = get_object_or_404(filter_by_tenant(Customer.objects.all(), request), pk=pk)
-    
-    # Ekstra güvenlik: Tenant kontrolü
-    if hasattr(customer, 'tenant') and customer.tenant != tenant:
-        messages.error(request, "Bu müşteriyi silme yetkiniz yok. Farklı bir firmaya ait.")
-        return redirect('customer_list')
-    
-    customer.delete()
-    messages.success(request, "Müşteri silindi.")
+    if request.method == 'POST':
+        customer = get_object_or_404(filter_by_tenant(Customer.objects.all(), request), pk=pk)
+        customer.delete()
+        messages.success(request, 'Müşteri silindi.')
+    return redirect('customer_list')
+
+@login_required
+def customer_map_view(request):
+    customers = filter_by_tenant(Customer.objects.exclude(latitude__isnull=True).exclude(longitude__isnull=True), request)
+    return render(request, 'apps/customers/map_view.html', {'customers': customers})
+
+@login_required
+def bulk_customer_action(request):
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        selected_ids = request.POST.getlist('selected_customers')
+        
+        if not selected_ids:
+            messages.warning(request, 'Lütfen en az bir müşteri seçin.')
+            return redirect('customer_list')
+            
+        if action == 'delete':
+            filter_by_tenant(Customer.objects.filter(id__in=selected_ids), request).delete()
+            messages.success(request, f'{len(selected_ids)} müşteri silindi.')
+            
+    return redirect('customer_list')
+
+@login_required
+def add_custom_field(request):
+    if request.method == 'POST':
+        name = request.POST.get('name')
+        field_type = request.POST.get('type')
+        
+        if name and field_type:
+            field = CustomerFieldDefinition(name=name, field_type=field_type)
+            set_tenant_on_save(field, request)
+            field.save()
+            messages.success(request, 'Özel alan eklendi.')
+            
     return redirect('customer_list')
 
 @login_required
 def cari_settings(request):
-    cariler = CustomerCari.objects.all().order_by('name')
     if request.method == 'POST':
-        form = CariForm(request.POST)
-        if form.is_valid():
-            form.save()
-            return redirect('cari_settings')
-    else: form = CariForm()
-    return render(request, 'apps/customers/cari_settings.html', {'cariler': cariler, 'form': form})
+        name = request.POST.get('name')
+        code = request.POST.get('code')
+        if name:
+            cari = CustomerCari(name=name, code=code)
+            set_tenant_on_save(cari, request)
+            cari.save()
+            messages.success(request, 'Cari eklendi.')
+            
+    caris = filter_by_tenant(CustomerCari.objects.all(), request)
+    return render(request, 'apps/customers/cari_settings.html', {'caris': caris})
 
 @login_required
 def delete_cari(request, pk):
-    get_object_or_404(CustomerCari, pk=pk).delete()
+    if request.method == 'POST':
+        cari = get_object_or_404(filter_by_tenant(CustomerCari.objects.all(), request), pk=pk)
+        cari.delete()
+        messages.success(request, 'Cari silindi.')
     return redirect('cari_settings')
-
-# Excel kısımları aynı kalacak, sadece JSON desteği eklenecek (uzun olmasın diye buraya yazmadım ama import/export içinde extra_data okunmalı)
-# Şimdilik temel fonksiyonları veriyorum.
-# apps/customers/views.py içindeki export_customers GÜNCELLENMİŞ HALİ
 
 @login_required
 def export_customers(request):
+    # CSV export implementation
+    import csv
+    from django.http import HttpResponse
+    
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="musteriler.csv"'
+    
+    writer = csv.writer(response)
+    writer.writerow(['Ad', 'Kod', 'Email', 'Telefon', 'Şehir', 'İlçe', 'Adres'])
+    
     customers = filter_by_tenant(Customer.objects.all(), request)
-    selected_fields = request.GET.get('fields', '')
-    
-    # TAM SÜTUN HARİTASI (Checkbox Value -> Excel Başlığı)
-    field_map = {
-        'sys_id': 'Sistem ID',
-        'code': 'Müşteri Kodu',
-        'name': 'Müşteri Adı',
-        'cari': 'Cari / Firma',
-        'city': 'İl',
-        'district': 'İlçe',
-        'phone': 'Telefon',
-        'auth': 'Yetkili Kişi',
-        'address': 'Adres',
-        'latitude': 'Enlem',   # Artık seçilebilir
-        'longitude': 'Boylam'  # Artık seçilebilir
-    }
-
-    # Özel alanları da haritaya ekle
-    custom_fields = CustomFieldDefinition.objects.all()
-    for cf in custom_fields:
-        field_map[f"custom_{cf.slug}"] = cf.name
-
-    if selected_fields: requested_keys = selected_fields.split(',')
-
-    else:
-        requested_keys = field_map.keys()
-
-    data = []
     for c in customers:
-        row = {}
-        # Standart Alanlar
-        if 'sys_id' in requested_keys: row[field_map['sys_id']] = c.get_sys_id_display()
-        if 'code' in requested_keys: row[field_map['code']] = c.customer_code
-        if 'name' in requested_keys: row[field_map['name']] = c.name
-        if 'cari' in requested_keys: row[field_map['cari']] = c.cari.name if c.cari else ''
-        if 'city' in requested_keys: row[field_map['city']] = c.city
-        if 'district' in requested_keys: row[field_map['district']] = c.district
-        if 'phone' in requested_keys: row[field_map['phone']] = c.phone
-        if 'auth' in requested_keys: row[field_map['auth']] = c.authorized_person
-        if 'address' in requested_keys: row[field_map['address']] = c.address
+        writer.writerow([c.name, c.customer_code, c.email, c.phone, c.city, c.district, c.address])
         
-        # Koordinatlar (Formatlı)
-        if 'latitude' in requested_keys: 
-            row[field_map['latitude']] = str(c.latitude).replace('.', ',') if c.latitude else ''
-        if 'longitude' in requested_keys: 
-            row[field_map['longitude']] = str(c.longitude).replace('.', ',') if c.longitude else ''
-        
-        # Özel Alanlar
-        for cf in custom_fields:
-            key = f"custom_{cf.slug}"
-            if key in requested_keys:
-                row[field_map[key]] = c.extra_data.get(cf.slug, '')
-        
-        data.append(row)
-    
-    content = xlsx_from_rows(data, sheet_name="Müşteriler")
-    response = HttpResponse(content, content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = 'attachment; filename=musteri_listesi.xlsx'
     return response
-
-# Bu fonksiyonu views.py içindeki boş olanla değiştir:
 
 @login_required
 def import_customers(request):
-    if request.method == 'POST' and request.FILES.get('excel_file'):
-        try:
-            rows = xlsx_to_rows(request.FILES['excel_file'])
-            if not rows:
-                messages.error(request, "Excel boş veya okunamadı.")
-                return redirect('customer_list')
-            
-            # 2. Standart Sütun Eşleştirmesi
-            col_map = {
-                'Müşteri Kodu': 'customer_code',
-                'Müşteri Adı': 'name',
-                'İl': 'city',
-                'İlçe': 'district',
-                'Enlem': 'latitude',
-                'Boylam': 'longitude',
-                'Telefon': 'phone',
-                'Yetkili Kişi': 'authorized_person',
-                'Adres': 'address'
-            }
+    """
+    Excel (.xlsx) ile müşteri import.
+    - Zorunlu sütunlar: Kod, Müşteri, İl, İlçe
+    - Opsiyonel: Cari/Firma, Adres, Telefon, Yetkili, Enlem, Boylam + Özel Alanlar
+    Hata durumunda kullanıcıya eksik/yanlış sütun ve satır bazlı hataları bildirir.
+    """
+    if request.method != 'POST':
+        return redirect('customer_list')
 
-            # 3. Özel Alanları Hazırla
-            custom_field_defs = CustomFieldDefinition.objects.all()
-            custom_map = {cf.name: cf.slug for cf in custom_field_defs}
+    tenant = get_current_tenant(request)
+    if not tenant:
+        messages.error(request, "Tenant bilgisi bulunamadı. Lütfen önce firmaya bağlanın.")
+        return redirect('customer_list')
 
-            updated_count = 0
-            created_count = 0
-            excel_columns = list(rows[0].keys())
+    f = request.FILES.get('excel_file')
+    if not f:
+        messages.error(request, "Lütfen bir Excel dosyası seçin.")
+        return redirect('customer_list')
 
-            for row in rows:
-                # --- A. ID KONTROLÜ ---
-                raw_id = row.get('Sistem ID')
-                sys_id = None
-                if raw_id:
-                    clean_id = str(raw_id).upper().replace('M-', '').replace('M', '').strip()
-                    if clean_id.isdigit():
-                        sys_id = int(clean_id)
+    filename = (getattr(f, "name", "") or "").lower()
+    if filename.endswith(".xls") and not filename.endswith(".xlsx"):
+        messages.error(request, "Şu an sadece .xlsx dosyaları destekleniyor. Lütfen dosyanızı .xlsx olarak kaydedip tekrar deneyin.")
+        return redirect('customer_list')
 
-                # --- B. VERİ HAZIRLIĞI ---
-                update_data = {}
-                extra_data_update = {} 
+    # Header normalize (Türkçe/Unicode güvenli)
+    # Excel başlıklarında "İl" gibi büyük İ -> lower() sonrası "i̇l" (combining dot) olur.
+    # Bunu yakalamak için NFKD + combining mark temizliği + Türkçe harf map uygula.
+    tr_map = str.maketrans({"ç": "c", "ğ": "g", "ş": "s", "ü": "u", "ı": "i", "ö": "o"})
 
-                # 1. Cari / Firma İşlemi
-                if 'Cari / Firma' in excel_columns:
-                    cari_val = row.get('Cari / Firma')
-                    if cari_val:
-                        cari_obj, _ = CustomerCari.objects.get_or_create(name=str(cari_val).strip())
-                        update_data['cari'] = cari_obj
+    def norm(s: str) -> str:
+        s = (s or "").strip()
+        # casefold unicode için daha güvenli
+        s = s.casefold()
+        # NFKD + combining mark temizle (örn: i̇ -> i)
+        s = unicodedata.normalize("NFKD", s)
+        s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+        # Türkçe map + boşluk/altçizgi/tire temizliği
+        s = s.translate(tr_map)
+        s = s.replace(" ", "").replace("_", "").replace("-", "")
+        return s
 
-                # 2. Standart Alanları Doldur
-                for excel_col, db_field in col_map.items():
-                    if excel_col in excel_columns:
-                        val = row.get(excel_col)
-                        # Koordinat Düzeltme
-                        if db_field in ['latitude', 'longitude'] and val is not None:
-                            try: val = float(str(val).replace(',', '.'))
-                            except: val = None
-                        update_data[db_field] = val
+    # Excel oku
+    try:
+        wb = openpyxl.load_workbook(f, data_only=True)
+        ws = wb.active
+    except Exception as e:
+        messages.error(request, f"Excel okunamadı: {e}")
+        return redirect('customer_list')
 
-                # 3. Özel Alanları (JSON) Doldur
-                for cf_name, cf_slug in custom_map.items():
-                    if cf_name in excel_columns:
-                        val = row.get(cf_name)
-                        if val is not None:
-                            extra_data_update[cf_slug] = str(val)
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows or not rows[0]:
+        messages.error(request, "Excel dosyası boş görünüyor.")
+        return redirect('customer_list')
 
-                # --- C. KAYIT / GÜNCELLEME ---
-                if sys_id:
-                    # GÜNCELLEME: sys_id'ye göre bul (tenant-specific)
-                    customer = filter_by_tenant(Customer.objects.all(), request).filter(sys_id=sys_id).first()
-                    if customer:
-                        for k, v in update_data.items():
-                            setattr(customer, k, v)
-                        
-                        if extra_data_update:
-                            if not customer.extra_data: customer.extra_data = {}
-                            customer.extra_data.update(extra_data_update)
-                        
-                        customer.save()
-                        updated_count += 1
-                else:
-                    # YENİ KAYIT
-                    if 'name' in update_data and update_data['name']:
-                        if 'customer_code' not in update_data:
-                            import random
-                            update_data['customer_code'] = f"AUTO-{random.randint(10000,99999)}"
-                        
-                        customer = Customer(**update_data)
-                        customer.extra_data = extra_data_update
-                        set_tenant_on_save(customer, request)
-                        customer.save()
-                        created_count += 1
+    header_row = [str(h).strip() if h is not None else "" for h in rows[0]]
+    if not any(header_row):
+        messages.error(request, "Excel başlık satırı boş. Lütfen ilk satırda sütun başlıkları olduğundan emin olun.")
+        return redirect('customer_list')
 
-            messages.success(request, f"✅ İşlem Tamamlandı: {updated_count} güncellendi, {created_count} yeni eklendi.")
-            
-        except Exception as e:
-            messages.error(request, f"❌ Hata oluştu: {str(e)}")
-            
-    # İŞTE EKSİK OLAN SATIR BUYDU:
-    return redirect('customer_list')
+    header_map = {norm(h): idx for idx, h in enumerate(header_row) if h}
 
-            # apps/customers/views.py dosyasının en altina ekle:
-
-import json
-from django.core.serializers.json import DjangoJSONEncoder
-
-@login_required
-def customer_map_view(request):
-    # URL'den gelen ID'leri al (Örn: ?ids=1,5,8)
-    selected_ids = request.GET.get('ids', '')
-    
-    locations = []
-    if selected_ids:
-        id_list = selected_ids.split(',')
-        # Sadece koordinatı olanları seç
-        customers = filter_by_tenant(Customer.objects.all(), request).filter(id__in=id_list).exclude(latitude__isnull=True).exclude(longitude__isnull=True)
-        
-        for c in customers:
-            locations.append({
-                'name': c.name,
-                'lat': c.latitude,
-                'lng': c.longitude,
-                'cari': c.cari.name if c.cari else '',
-                'city': c.city
-            })
-    
-    context = {
-        'locations_json': json.dumps(locations, cls=DjangoJSONEncoder)
+    # Desteklenen sütun isimleri -> alan
+    aliases = {
+        "kod": "customer_code",
+        "musterikodu": "customer_code",
+        "customercode": "customer_code",
+        "musteri": "name",
+        "musteriadi": "name",
+        "ad": "name",
+        "il": "city",
+        "sehir": "city",
+        "city": "city",
+        "ilce": "district",
+        "district": "district",
+        "adres": "address",
+        "acikadres": "address",
+        "telefon": "phone",
+        "tel": "phone",
+        "yetkili": "authorized_person",
+        "yetkilikisi": "authorized_person",
+        "authorizedperson": "authorized_person",
+        "cari": "cari",
+        "carifirma": "cari",
+        "firma": "cari",
+        "enlem": "latitude",
+        "latitude": "latitude",
+        "boylam": "longitude",
+        "longitude": "longitude",
+        "sysid": "sys_id",
+        "sistemid": "sys_id",
     }
-    return render(request, 'apps/customers/map_view.html', context)
+
+    # Header -> field index map
+    field_idx = {}
+    unknown_headers = []
+    for raw_h in header_row:
+        key = norm(raw_h)
+        if not key:
+            continue
+        if key in aliases:
+            field_idx[aliases[key]] = header_map[key]
+        else:
+            unknown_headers.append(raw_h)
+
+    required_fields = ["customer_code", "name", "city", "district"]
+    missing = [f for f in required_fields if f not in field_idx]
+    if missing:
+        friendly = {
+            "customer_code": "Kod",
+            "name": "Müşteri",
+            "city": "İl",
+            "district": "İlçe",
+        }
+        missing_names = ", ".join([friendly.get(m, m) for m in missing])
+        messages.error(
+            request,
+            f"❌ Eksik sütun(lar): {missing_names}. Excel başlıkları: {', '.join([h for h in header_row if h])}"
+        )
+        return redirect('customer_list')
+
+    # Özel alanlar: kalan sütunları extra_data'ya yaz
+    # Var olan custom alan tanımları varsa onlarla eşleştir (slug üzerinden)
+    custom_defs = list(CustomFieldDefinition.objects.all())
+    custom_slug_set = {d.slug: d for d in custom_defs}
+
+    def parse_float(v):
+        if v is None or v == "":
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        s = str(v).strip().replace(",", ".")
+        return float(s)
+
+    created = 0
+    updated = 0
+    errors = []
+
+    # Data satırları
+    for r_i, row in enumerate(rows[1:], start=2):  # Excel satır no = 1-based
+        if row is None:
+            continue
+
+        def get(field):
+            idx = field_idx.get(field)
+            return row[idx] if idx is not None and idx < len(row) else None
+
+        code = (get("customer_code") or "").strip() if isinstance(get("customer_code"), str) else str(get("customer_code") or "").strip()
+        name = (get("name") or "").strip() if isinstance(get("name"), str) else str(get("name") or "").strip()
+        city = (get("city") or "").strip() if isinstance(get("city"), str) else str(get("city") or "").strip()
+        district = (get("district") or "").strip() if isinstance(get("district"), str) else str(get("district") or "").strip()
+
+        if not code:
+            errors.append(f"Satır {r_i}: Kod boş.")
+            continue
+        if not name:
+            errors.append(f"Satır {r_i}: Müşteri adı boş.")
+            continue
+        if not city:
+            errors.append(f"Satır {r_i}: İl boş.")
+            continue
+        if not district:
+            errors.append(f"Satır {r_i}: İlçe boş.")
+            continue
+
+        # Cari
+        cari_obj = None
+        cari_val = get("cari")
+        if cari_val is not None and str(cari_val).strip():
+            cari_name = str(cari_val).strip()
+            cari_obj, _ = CustomerCari.objects.get_or_create(name=cari_name)
+
+        # Koordinatlar
+        try:
+            lat = parse_float(get("latitude"))
+        except Exception:
+            errors.append(f"Satır {r_i}: Enlem (latitude) sayı olmalı.")
+            lat = None
+        try:
+            lng = parse_float(get("longitude"))
+        except Exception:
+            errors.append(f"Satır {r_i}: Boylam (longitude) sayı olmalı.")
+            lng = None
+
+        # Opsiyoneller
+        address = get("address")
+        phone = get("phone")
+        authorized = get("authorized_person")
+
+        # extra_data: bilinen alanlar dışındaki sütunları ekle
+        extra = {}
+        for col_i, raw_h in enumerate(header_row):
+            if not raw_h:
+                continue
+            k_norm = norm(raw_h)
+            if not k_norm:
+                continue
+            if k_norm in aliases:  # bilinen
+                continue
+
+            val = row[col_i] if col_i < len(row) else None
+            if val is None or str(val).strip() == "":
+                continue
+
+            slug = slugify(str(raw_h).strip().translate(tr_map))
+            if slug in custom_slug_set:
+                extra[slug] = str(val).strip()
+            else:
+                # tanım yoksa da slug ile yaz (sonradan alan tanımı eklenince görünür)
+                extra[slug] = str(val).strip()
+
+        # Upsert
+        existing = Customer.objects.filter(customer_code=code).first()
+        if existing and existing.tenant_id and existing.tenant_id != tenant.id:
+            errors.append(f"Satır {r_i}: Kod '{code}' başka firmaya ait ({existing.tenant}).")
+            continue
+
+        if existing:
+            existing.name = name
+            existing.city = city
+            existing.district = district
+            existing.address = str(address).strip() if address is not None else None
+            existing.phone = str(phone).strip() if phone is not None else None
+            existing.authorized_person = str(authorized).strip() if authorized is not None else None
+            existing.cari = cari_obj
+            existing.latitude = lat
+            existing.longitude = lng
+            existing.tenant = tenant
+            existing.extra_data = {**(existing.extra_data or {}), **extra}
+            existing.save()
+            updated += 1
+        else:
+            c = Customer(
+                customer_code=code,
+                name=name,
+                city=city,
+                district=district,
+                address=str(address).strip() if address is not None else None,
+                phone=str(phone).strip() if phone is not None else None,
+                authorized_person=str(authorized).strip() if authorized is not None else None,
+                cari=cari_obj,
+                latitude=lat,
+                longitude=lng,
+                tenant=tenant,
+                extra_data=extra,
+            )
+            c.save()
+            created += 1
+
+    # Mesajlar
+    if unknown_headers:
+        # Bilgi amaçlı: import yine de yapıldı, sadece eşleştirilmemiş sütunları bildir
+        uniq_unknown = []
+        for h in unknown_headers:
+            if h and h not in uniq_unknown:
+                uniq_unknown.append(h)
+        if uniq_unknown:
+            messages.info(request, f"ℹ️ Bilinmeyen sütunlar extra_data olarak kaydedildi: {', '.join(uniq_unknown[:10])}" + (" ..." if len(uniq_unknown) > 10 else ""))
+
+    if created or updated:
+        messages.success(request, f"✅ Import tamamlandı. Yeni: {created}, Güncellenen: {updated}")
+
+    if errors:
+        preview = "<br>".join(errors[:12])
+        more = f"<br>... (+{len(errors)-12} hata)" if len(errors) > 12 else ""
+        messages.error(request, f"❌ Import sırasında bazı hatalar oluştu:<br>{preview}{more}")
+
+    if not created and not updated and not errors:
+        messages.info(request, "ℹ️ Import edilecek satır bulunamadı.")
+
+    return redirect('customer_list')

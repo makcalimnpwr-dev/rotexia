@@ -1,0 +1,50 @@
+========================================
+OTOMATIK MAIL GONDERIMI - KURULUM
+========================================
+
+SORUN: Mail gelmiyor çünkü Task Scheduler görevi kurulu değil!
+
+COZUM ADIMLARI:
+========================================
+
+1. ADIM: Task Scheduler Görevini Kurun
+   -----------------------------------------
+   
+   Yöntem A: Otomatik Kurulum (ÖNERİLEN)
+   - setup_automated_email_scheduler.bat dosyasına SAĞ TIKLAYIN
+   - "Run as administrator" seçin
+   - Script görevi otomatik oluşturacak
+   
+   Yöntem B: Manuel Kurulum
+   1. Windows tuşuna basın, "Task Scheduler" yazın ve açın
+   2. Sağ tarafta "Create Basic Task" tıklayın
+   3. Name: FieldOps_AutomatedEmails
+   4. Description: Otomatik Mail Gönderimi
+   5. Trigger: Daily, Repeat task every: 5 minutes
+   6. Action: Start a program
+      - Program: python
+      - Arguments: manage.py send_automated_emails
+      - Start in: C:\Users\musta\Desktop\field_ops_project1
+   7. "Run whether user is logged on or not" seçin
+   8. Finish
+
+2. ADIM: Mail'in Aktif Olduğundan Emin Olun
+   -----------------------------------------
+   - Otomatik Mail sayfasına gidin
+   - Mail'inizi düzenleyin
+   - "Aktif" kutusunu işaretleyin
+   - Kaydedin
+
+3. ADIM: Test Edin
+   -----------------------------------------
+   Komut satırından:
+   python manage.py send_automated_emails
+
+VEYA Task Scheduler'dan görevi manuel çalıştırın
+
+========================================
+NOT: Task Scheduler görevi kurulmadan
+otomatik mail gönderimi ÇALIŞMAZ!
+========================================
+
+

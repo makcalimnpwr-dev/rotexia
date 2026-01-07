@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: fieldops-web
+    env: python
+    buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
+    startCommand: gunicorn config.wsgi:application
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings
+      - key: PYTHON_VERSION
+        value: 3.11.0
+    
+  # Background Worker - Otomatik Mail Gönderimi (Her 5 dakikada bir kontrol eder)
+  - type: worker
+    name: fieldops-automated-emails
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python manage.py send_automated_emails --loop
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings
+      - key: PYTHON_VERSION
+        value: 3.11.0
+    # NOT: --loop parametresi worker'ın sürekli çalışıp her 5 dakikada bir mail kontrol etmesini sağlar
+
+

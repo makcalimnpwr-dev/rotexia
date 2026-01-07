@@ -196,6 +196,8 @@
             <a href="{% url 'route_plan_list' %}"><i class="fas fa-route"></i> Rota Planı</a>
             <a href="{% url 'survey_list' %}"><i class="fas fa-clipboard-check"></i> Formlar</a>
             <a href="{% url 'visuals_gallery' %}"><i class="fas fa-images"></i> Görseller</a>
+            {# Root admin için Otomatik Mail admin panelde de görünür (panel değiştirmeden firma seçimi yapılır) #}
+            <a href="{% url 'automated_email_list' %}"><i class="fas fa-envelope"></i> Otomatik Mail</a>
             <a href="#reportsMenu" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="reportsMenu">
                 <i class="fas fa-chart-line"></i> Raporlar
                 <span class="float-end" style="opacity:.7;"><i class="fas fa-chevron-down"></i></span>
@@ -210,6 +212,10 @@
             <a href="{% url 'route_plan_list' %}"><i class="fas fa-route"></i> Rota Planı</a>
             <a href="{% url 'survey_list' %}"><i class="fas fa-clipboard-check"></i> Formlar</a>
             <a href="{% url 'visuals_gallery' %}"><i class="fas fa-images"></i> Görseller</a>
+            {# Otomatik Mail sadece firma (tenant) panelinde görünür #}
+            {% if tenant and not is_admin_panel %}
+                <a href="{% url 'automated_email_list' %}"><i class="fas fa-envelope"></i> Otomatik Mail</a>
+            {% endif %}
             <a href="#reportsMenu" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="reportsMenu">
                 <i class="fas fa-chart-line"></i> Raporlar
                 <span class="float-end" style="opacity:.7;"><i class="fas fa-chevron-down"></i></span>
@@ -262,6 +268,13 @@
                         {% endif %}
                         {% endwith %}
 
+                        {# Otomatik Mail: Firma panelinde ve rapor izni varsa göster #}
+                        {% with enabled=menu|get_item:'reports' %}
+                        {% if enabled != False and tenant and not is_admin_panel and user_menu_perms|get_item:'reports' %}
+                        <a href="{% url 'automated_email_list' %}"><i class="fas fa-envelope"></i> Otomatik Mail</a>
+                        {% endif %}
+                        {% endwith %}
+
                         {% with enabled=menu|get_item:'reports' %}
                         {% if enabled != False and user_menu_perms|get_item:'reports' %}
                         <a href="#reportsMenu" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="reportsMenu">
@@ -293,6 +306,9 @@
                     {% endif %}
                     {% if user_menu_perms|get_item:'images' %}
                     <a href="{% url 'visuals_gallery' %}"><i class="fas fa-images"></i> Görseller</a>
+                    {% endif %}
+                    {% if tenant and not is_admin_panel and user_menu_perms|get_item:'reports' %}
+                    <a href="{% url 'automated_email_list' %}"><i class="fas fa-envelope"></i> Otomatik Mail</a>
                     {% endif %}
                     {% if user_menu_perms|get_item:'reports' %}
                     <a href="#reportsMenu" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="reportsMenu">
@@ -358,6 +374,9 @@
           {% else %}
             <a href="{% url 'settings_home' %}"><i class="fas fa-cog"></i> Ayarlar</a>
           {% endif %}
+        {% elif is_tenant_admin %}
+          {# Tenant admin için de Ayarlar menüsü göster #}
+          <a href="{% url 'settings_home' %}"><i class="fas fa-cog"></i> Ayarlar</a>
         {% endif %}
         <form action="{% url 'logout' %}" method="post" id="logout-form">
             {% csrf_token %}
@@ -521,6 +540,18 @@
             const textColor = isBright ? '#1a1a1a' : '#ffffff';
             const inactiveTextColor = isBright ? '#333' : '#a4a6b3';
             const borderColor = isBright ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.3)';
+            
+            // Hover ve active arka plan renklerini hesapla
+            let hoverBg, activeBg;
+            if (isBright) {
+                // Açık renkler için koyu hover/active
+                hoverBg = 'rgba(0, 0, 0, 0.1)';
+                activeBg = 'rgba(0, 0, 0, 0.15)';
+            } else {
+                // Koyu renkler için açık hover/active
+                hoverBg = 'rgba(255, 255, 255, 0.1)';
+                activeBg = 'rgba(255, 255, 255, 0.2)';
+            }
             
             // Brand rengi
             sidebar.querySelector('.sidebar-brand').style.color = textColor;

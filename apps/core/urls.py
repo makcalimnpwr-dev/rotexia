@@ -15,6 +15,7 @@ urlpatterns = [
     # path('company/select/<int:tenant_id>/', views.select_company, name='select_company'),  # Devre dışı bırakıldı
     path('company/edit/<int:tenant_id>/', views.edit_tenant, name='edit_tenant'),
     path('company/delete/<int:tenant_id>/', views.delete_tenant, name='delete_tenant'),
+    path('company/login/<int:tenant_id>/', views.login_as_tenant_superuser, name='login_as_tenant_superuser'),
     path('company/create-missing-admins/', views.create_missing_admin_users, name='create_missing_admin_users'),
     # ... mevcut urller ...
     path('app/', views.mobile_home, name='mobile_home'), # Mobilin anasayfası
@@ -39,4 +40,11 @@ urlpatterns = [
     path('api/check-visit-status/<int:task_id>/', views.check_visit_status, name='api_check_visit_status'),
     path('api/sync-pending-data/', views.mobile_sync_pending_data, name='mobile_sync_pending_data'),
     path('api/get-sync-interval/', views.get_data_sync_interval, name='api_get_data_sync_interval'),
+    
+    # --- OTOMATIK MAIL ---
+    path('automated-email/', views.automated_email_list, name='automated_email_list'),
+    path('automated-email/create/', views.automated_email_create, name='automated_email_create'),
+    path('automated-email/<int:pk>/edit/', views.automated_email_edit, name='automated_email_edit'),
+    path('automated-email/<int:pk>/send-now/', views.automated_email_send_now, name='automated_email_send_now'),
+    path('automated-email/<int:pk>/delete/', views.automated_email_delete, name='automated_email_delete'),
 ]

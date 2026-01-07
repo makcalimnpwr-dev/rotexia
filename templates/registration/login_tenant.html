@@ -435,7 +435,7 @@
                 <form method="post" action="{% url 'login' %}">
                     {% csrf_token %}
                     {% if tenant %}
-                        <input type="hidden" name="tenant_slug" value="{{ tenant.slug }}">
+                    <input type="hidden" name="tenant_slug" value="{{ tenant.slug }}">
                     {% endif %}
                     
                     {% if messages %}
@@ -447,32 +447,7 @@
                         {% endfor %}
                     {% endif %}
 
-                    {% if show_tenant_dropdown or not tenant %}
-                    <div class="form-group">
-                        <label class="form-label" for="tenant_selection">Sistem Seçimi</label>
-                        <div class="input-wrapper">
-                            <select 
-                                id="tenant_selection" 
-                                name="tenant_selection" 
-                                class="form-control" 
-                                required
-                                style="padding-left: 56px; appearance: none; background-image: url('data:image/svg+xml;charset=UTF-8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22rgba(255,255,255,0.5)%22 stroke-width=%222%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22><polyline points=%226 9 12 15 18 9%22></polyline></svg>'); background-repeat: no-repeat; background-position: right 20px center; background-size: 16px;"
-                            >
-                                <option value="developer">🔧 Geliştirici</option>
-                                {% if all_tenants %}
-                                    <optgroup label="Firmalar">
-                                        {% for t in all_tenants %}
-                                            <option value="{{ t.id }}" {% if tenant and tenant.id == t.id %}selected{% endif %}>
-                                                {{ t.name }}{% if not t.is_active %} (Pasif){% endif %}
-                                            </option>
-                                        {% endfor %}
-                                    </optgroup>
-                                {% endif %}
-                            </select>
-                            <i class="fas fa-building input-icon"></i>
-                        </div>
-                    </div>
-                    {% endif %}
+                    {# KURAL: Sistem seçimi yok. Giriş sadece "Firma adı -> Bağlan" akışı ile yapılır. #}
 
                     <div class="form-group">
                         <label class="form-label" for="username">Kullanıcı Adı</label>

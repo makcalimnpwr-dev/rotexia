@@ -75,12 +75,99 @@ def init_default_settings():
             'input_type': 'number',
             'description': 'Ziyaret sırasında mağaza konumundan maksimum uzaklaşma mesafesi. Bu mesafeyi aşarsa ziyaret otomatik bitirilir.'
         },
+        
+        # --- E-POSTA AYARLARI ---
+        {
+            'key': 'email_host',
+            'label': 'SMTP Sunucu',
+            'value': '',
+            'category': 'email',
+            'input_type': 'text',
+            'description': 'SMTP sunucu adresi (örn: smtp.gmail.com, smtp.office365.com)'
+        },
+        {
+            'key': 'email_port',
+            'label': 'SMTP Port',
+            'value': '587',
+            'category': 'email',
+            'input_type': 'number',
+            'description': 'SMTP port numarası (genellikle 587 veya 465)'
+        },
+        {
+            'key': 'email_use_tls',
+            'label': 'TLS Kullan',
+            'value': 'True',
+            'category': 'email',
+            'input_type': 'bool',
+            'description': 'TLS şifreleme kullanılsın mı? (Genellikle açık olmalı)'
+        },
+        {
+            'key': 'email_host_user',
+            'label': 'SMTP Kullanıcı Adı',
+            'value': '',
+            'category': 'email',
+            'input_type': 'text',
+            'description': 'E-posta adresi (örn: noreply@yourdomain.com)'
+        },
+        {
+            'key': 'email_host_password',
+            'label': 'SMTP Şifresi',
+            'value': '',
+            'category': 'email',
+            'input_type': 'password',
+            'description': 'E-posta şifresi veya App Password (Gmail için)'
+        },
+        {
+            'key': 'email_default_from_email',
+            'label': 'Gönderen E-posta',
+            'value': 'noreply@rotexia.com',
+            'category': 'email',
+            'input_type': 'text',
+            'description': 'Gönderen olarak görünecek e-posta adresi'
+        },
     ]
 
     for setting in defaults:
-        # Eğer bu ayar veritabanında yoksa oluştur
-        if not SystemSetting.objects.filter(key=setting['key']).exists():
-            SystemSetting.objects.create(**setting)
+        # Eğer bu ayar veritabanında yoksa oluştur (tenant=None - Rotexia şablonu)
+        if not SystemSetting.objects.filter(key=setting['key'], tenant__isnull=True).exists():
+            SystemSetting.objects.create(**setting, tenant=None)
+
+def sync_settings_to_all_tenants():
+    """
+    Rotexia'daki (tenant=None) ayar şablonlarını tüm firmalara kopyalar.
+    Rotexia'da eklenen yeni ayarlar otomatik olarak tüm firmalara eklenir.
+    """
+    from .models import Tenant
+    
+    # Rotexia şablon ayarları (tenant=None)
+    rotexia_settings = SystemSetting.objects.filter(tenant__isnull=True)
+    
+    # Tüm aktif firmalar
+    tenants = Tenant.objects.filter(is_active=True)
+    
+    synced_count = 0
+    for tenant in tenants:
+        for template_setting in rotexia_settings:
+            # Bu firma için bu ayar var mı kontrol et
+            tenant_setting = SystemSetting.objects.filter(
+                key=template_setting.key,
+                tenant=tenant
+            ).first()
+            
+            # Yoksa şablonundan kopyala
+            if not tenant_setting:
+                SystemSetting.objects.create(
+                    tenant=tenant,
+                    key=template_setting.key,
+                    label=template_setting.label,
+                    value=template_setting.value,  # Şablon değerini kopyala
+                    category=template_setting.category,
+                    input_type=template_setting.input_type,
+                    description=template_setting.description
+                )
+                synced_count += 1
+    
+    return synced_count
 
 # --- OTOMATİK GİRİŞ ---
 def auto_login(request):
@@ -155,6 +242,12 @@ def admin_settings(request):
     Burada eklenen içerikler firmalara otomatik aktarılmaz
     Subdomain-only mod: Sadece admin.fieldops.com'dan erişilmeli
     """
+    # Varsayılan ayarları oluştur (eğer yoksa)
+    try:
+        init_default_settings()
+    except Exception as e:
+        print(f"[WARNING] init_default_settings failed: {str(e)}")
+    
     # Admin panelinde tenant olmamalı
     request.tenant = None
     
@@ -207,8 +300,8 @@ def admin_settings(request):
                 except UserRole.DoesNotExist:
                     messages.error(request, '❌ Rol bulunamadı veya bu rol silinemez.')
         
-        # Handle regular settings update (global ayarlar)
-        all_settings = SystemSetting.objects.all()
+        # Handle regular settings update (global ayarlar - Rotexia şablon)
+        all_settings = SystemSetting.objects.filter(tenant__isnull=True)
         for setting in all_settings:
             if setting.input_type == 'bool':
                 new_val = 'True' if request.POST.get(setting.key) == 'on' else 'False'
@@ -219,22 +312,40 @@ def admin_settings(request):
                 setting.value = new_val
                 setting.save()
         
+        # Rotexia'da ayar değiştiyse, tüm firmalara sync et
         if 'add_role' not in request.POST and 'delete_role' not in request.POST:
-            messages.success(request, '✅ Ayarlar kaydedildi.')
+            sync_count = sync_settings_to_all_tenants()
+            if sync_count > 0:
+                messages.success(request, f'✅ Ayarlar kaydedildi ve {sync_count} yeni ayar tüm firmalara eklendi.')
+            else:
+                messages.success(request, '✅ Ayarlar kaydedildi.')
         return redirect('admin_settings')
     
-    # --- VERİLERİ ÇEK (TENANT=None - GLOBAL) ---
-    settings_general = SystemSetting.objects.filter(category='general')
-    settings_visit = SystemSetting.objects.filter(category='visit')
-    settings_user = SystemSetting.objects.filter(category='user')
+    # --- VERİLERİ ÇEK (TENANT=None - GLOBAL/ROTEXIA ŞABLON) ---
+    settings_general = SystemSetting.objects.filter(category='general', tenant__isnull=True)
+    settings_visit = SystemSetting.objects.filter(category='visit', tenant__isnull=True)
+    settings_user = SystemSetting.objects.filter(category='user', tenant__isnull=True)
+    settings_email = SystemSetting.objects.filter(category='email', tenant__isnull=True).order_by('id')
+    
+    # Eğer mail ayarları yoksa, tekrar oluştur
+    if not settings_email.exists():
+        print("[DEBUG] Email settings not found, creating...")
+        init_default_settings()
+        settings_email = SystemSetting.objects.filter(category='email').order_by('id')
+    
     # Admin panelinde sadece tenant=None olan rolleri göster (global şablonlar)
     user_roles = UserRole.objects.filter(tenant__isnull=True).order_by('name')
+    
+    root_admin = is_root_admin(request.user)
+    print(f"[DEBUG] is_root_admin: {root_admin}, email settings count: {settings_email.count()}")
 
     context = {
         'is_admin_panel': True,
+        'is_root_admin': root_admin,
         'settings_general': settings_general,
         'settings_visit': settings_visit,
         'settings_user': settings_user,
+        'settings_email': settings_email,
         'user_roles': user_roles,
     }
     return render(request, 'apps/Core/settings.html', context)
@@ -325,25 +436,45 @@ def tenant_settings(request):
                     messages.error(request, '❌ Rol bulunamadı veya bu rol silinemez.')
         
         # Handle regular settings update (tenant-specific)
-        all_settings = filter_by_tenant(SystemSetting.objects.all(), request)
+        # Önce Rotexia şablon ayarlarını bu firmaya sync et (yoksa ekle)
+        sync_settings_to_all_tenants()
+        
+        # Şimdi tenant'a özel ayarları güncelle
+        all_settings = SystemSetting.objects.filter(tenant=tenant)
+        updated_count = 0
         for setting in all_settings:
             if setting.input_type == 'bool':
                 new_val = 'True' if request.POST.get(setting.key) == 'on' else 'False'
             else:
-                new_val = request.POST.get(setting.key)
+                new_val = request.POST.get(setting.key, '').strip()  # Boş string'i de al
             
-            if new_val is not None:
+            # Boş string veya None kontrolü (password için özel durum)
+            if setting.input_type == 'password' and not new_val:
+                # Password alanı boşsa, mevcut değeri koru (değiştirme)
+                continue
+            
+            # Değer varsa güncelle
+            if new_val is not None and new_val != '':
                 setting.value = new_val
-                setting.save()
+                setting.save(update_fields=['value'])
+                updated_count += 1
         
         if 'add_role' not in request.POST and 'delete_role' not in request.POST:
-            messages.success(request, '✅ Ayarlar kaydedildi.')
+            if updated_count > 0:
+                messages.success(request, f'✅ {updated_count} ayar kaydedildi.')
+            else:
+                messages.info(request, 'ℹ️ Değişiklik yapılmadı.')
         return redirect('tenant_settings')
     
+    # Rotexia şablon ayarlarını bu firmaya sync et (yoksa ekle)
+    sync_settings_to_all_tenants()
+    
     # --- VERİLERİ ÇEK (TENANT-SPECIFIC) ---
-    settings_general = filter_by_tenant(SystemSetting.objects.filter(category='general'), request)
-    settings_visit = filter_by_tenant(SystemSetting.objects.filter(category='visit'), request)
-    settings_user = filter_by_tenant(SystemSetting.objects.filter(category='user'), request)
+    settings_general = SystemSetting.objects.filter(tenant=tenant, category='general')
+    settings_visit = SystemSetting.objects.filter(tenant=tenant, category='visit')
+    settings_user = SystemSetting.objects.filter(tenant=tenant, category='user')
+    settings_email = SystemSetting.objects.filter(tenant=tenant, category='email').order_by('id')
+    
     # Sadece bu firmanın rolleri
     user_roles = filter_by_tenant(UserRole.objects.all(), request).order_by('name')
 
@@ -353,6 +484,7 @@ def tenant_settings(request):
         'settings_general': settings_general,
         'settings_visit': settings_visit,
         'settings_user': settings_user,
+        'settings_email': settings_email,
         'user_roles': user_roles,
     }
     return render(request, 'apps/Core/settings.html', context)
@@ -371,34 +503,7 @@ def migrate_old_settings():
         else:
             # Yeni ayar zaten varsa, eski ayarı sil
             old_require_gps.delete()
-    
-    # CASUS KOD BAŞLANGICI
-    print("----------------------------------------")
-    print("👀 VIEW ÇALIŞIYOR - KONTROL ZAMANI")
-    all_count = SystemSetting.objects.count()
-    visit_count = SystemSetting.objects.filter(category='visit').count()
-    print(f"Toplam Kayıt: {all_count}")
-    print(f"Ziyaret Kategorisi Sayısı: {visit_count}")
-    
-    # Verileri ekrana da basalım
-    for s in SystemSetting.objects.all():
-        print(f" -> Kayıt: {s.key} | Kategori: '{s.category}'")
-    print("----------------------------------------")
-    # CASUS KOD BİTİŞİ
-
-    # --- 3. VERİLERİ ÇEK ---
-    settings_general = SystemSetting.objects.filter(category='general')
-    settings_visit = SystemSetting.objects.filter(category='visit')
-    settings_user = SystemSetting.objects.filter(category='user')
-    user_roles = UserRole.objects.all().order_by('name')
-
-    context = {
-        'settings_general': settings_general,
-        'settings_visit': settings_visit,
-        'settings_user': settings_user,
-        'user_roles': user_roles,
-    }
-    return render(request, 'apps/Core/settings.html', context)
+    return None
 
 # --- AKILLI ANASAYFA ---
 def index(request):
@@ -437,16 +542,17 @@ def company_connect(request):
         # Mobil cihaz kontrolü
         is_mobile = _is_mobile_device(request)
         
-        # "Rotexia" veya sistem adı yazıldıysa login sayfasına yönlendir (tenant bilgisi olmadan)
-        # Login sayfasında dropdown ile "Geliştirici" veya firma seçilecek
+        # "Rotexia" (ana sistem) yazıldıysa: Root admin giriş ekranına yönlendir.
+        # KURAL: Firma adıyla bağlanıldıysa, o firmadan başka bir sisteme geçiş OLMAZ.
         if company_name.lower() in ['rotexia', 'sistem', 'admin']:
-            # Session'ı temizle (tenant bilgisi olmadan login sayfasına git)
-            for key in ['connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel']:
+            # Tenant session'ını temizle: Rotexia akışı tenant seçimi değildir.
+            for key in ['tenant_id', 'connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel']:
                 request.session.pop(key, None)
-            # Mobil ise mobil login'e, değilse normal login'e yönlendir
+
+            # Mobil ise mobil login'e, değilse admin login'e yönlendir.
             if is_mobile:
                 return redirect('mobile_login')
-            return redirect('login')
+            return redirect('admin_login')
         
         # Eski mantık: Firma adından tenant'ı bul (geriye dönük uyumluluk için)
         from django.utils.text import slugify
@@ -527,33 +633,22 @@ def home(request):
         parts = host_without_port.split('.')
         subdomain = parts[0].lower()
     
-    # Root admin kontrolü - Admin panelinden bağlanıldıysa tenant paneline git
-    admin_from_panel = request.session.get('admin_from_panel', False)
-    if is_root_admin(request.user) and not admin_from_panel:
-        # Root admin için özet istatistikleri göster (anasayfa)
-        User = get_user_model()
-        all_tenants = Tenant.objects.all()
-        
-        stats = {
-            'total_tenants': all_tenants.count(),
-            'active_tenants': Tenant.objects.filter(is_active=True).count(),
-            'inactive_tenants': Tenant.objects.filter(is_active=False).count(),
-            'total_users': User.objects.filter(tenant__isnull=False).count(),  # Sadece firma kullanıcıları (root admin hariç)
-            'total_customers': Customer.objects.count(),
-            'total_tasks': VisitTask.objects.count(),
-            'completed_tasks': VisitTask.objects.filter(status='completed').count(),
-            'pending_tasks': VisitTask.objects.filter(status='pending').count(),
-        }
-        
-        context = {
-            'stats': stats,
-            'is_admin_panel': False,  # Anasayfa, admin paneli değil
-            'tenant': None,
-        }
-        return render(request, 'apps/Core/admin_dashboard.html', context)
-    
     # Tenant'ı middleware'den al (subdomain veya session'dan)
     tenant = getattr(request, 'tenant', None)
+    
+    # Admin panelinden bağlanıldıysa (admin_from_panel), session'dan tenant'ı oku
+    admin_from_panel = request.session.get('admin_from_panel', False)
+    if admin_from_panel and not tenant:
+        tenant_id = request.session.get('tenant_id') or request.session.get('connect_tenant_id')
+        if tenant_id:
+            try:
+                tenant = Tenant.objects.get(id=tenant_id, is_active=True)
+                request.tenant = tenant  # Request'e ekle
+            except Tenant.DoesNotExist:
+                # Geçersiz tenant_id, session'dan temizle
+                request.session.pop('tenant_id', None)
+                request.session.pop('connect_tenant_id', None)
+                request.session.pop('admin_from_panel', None)
     
     # Subdomain yoksa (development - localhost:8000 veya 127.0.0.1:8000)
     if not has_subdomain:
@@ -570,8 +665,12 @@ def home(request):
                     request.session.pop('tenant_id', None)
                     request.session.pop('connect_tenant_id', None)
             
-            # Hala tenant yoksa ana sayfaya yönlendir
+            # Hala tenant yoksa ve root admin değilse ana sayfaya yönlendir
             if not tenant:
+                # Root admin ise ve admin_from_panel yoksa admin paneline yönlendir
+                if is_root_admin(request.user) and not admin_from_panel:
+                    messages.info(request, 'Lütfen bir firmayı seçin veya admin panelinden işlem yapın.')
+                    return redirect('admin_home')
                 messages.error(request, 'Firma bilgisi bulunamadı. Lütfen firma adınızı girin.')
                 return redirect('index')
     
@@ -771,15 +870,15 @@ def logout_view(request):
     # Logout yap (kullanıcı oturumunu sonlandır)
     auth_logout(request)
     
-    # Root admin ise login sayfasına yönlendir (dropdown ile sistem seçimi yapılacak)
+    # Root admin ise admin login sayfasına yönlendir
     if is_root_admin_user:
-        # Tüm session'ı temizle (dropdown ile seçim yapılacak)
+        # Tüm session'ı temizle
         for key in ['tenant_id', 'connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel', 'from_tenant_logout', 'logout_tenant_slug', 'logout_tenant_name']:
             request.session.pop(key, None)
         # Mobil ise mobil login'e, değilse normal login'e yönlendir
         if is_mobile:
             return redirect('mobile_login')
-        return redirect('login')  # Login sayfasına yönlendir (dropdown ile "Geliştirici" seçilebilir)
+        return redirect('admin_login')
     
     # Tenant kullanıcısı çıkışı
     # Logout'tan önce hangi tenant bilgisini kullanacağımızı belirle
@@ -962,6 +1061,32 @@ def edit_tenant(request, tenant_id):
         if 'logo' in request.FILES:
             tenant.logo = request.FILES['logo']
         
+        # Superuser bilgileri güncelleme
+        if 'superuser_username' in request.POST:
+            new_username = request.POST.get('superuser_username', '').strip()
+            new_password = request.POST.get('superuser_password', '').strip()
+            
+            # Kullanıcı adı değiştiyse
+            if new_username != tenant.superuser_username:
+                # Eski kullanıcıyı bul ve username'i güncelle
+                User = get_user_model()
+                old_user = User.objects.filter(username=tenant.superuser_username, tenant=tenant).first()
+                if old_user:
+                    old_user.username = new_username
+                    old_user.save()
+                
+                tenant.superuser_username = new_username
+            
+            # Şifre girildiyse güncelle
+            if new_password:
+                tenant.superuser_plain_password = new_password
+                # Kullanıcının şifresini güncelle
+                User = get_user_model()
+                user = User.objects.filter(username=tenant.superuser_username, tenant=tenant).first()
+                if user:
+                    user.set_password(new_password)
+                    user.save()
+        
         # Menü ayarları güncelleme
         menu_settings = {}
         for menu_key in default_menus.keys():
@@ -980,7 +1105,7 @@ def edit_tenant(request, tenant_id):
         # Tenant'ı veritabanından yeniden yükle (cache temizleme için)
         tenant.refresh_from_db()
         
-        messages.success(request, f'✅ "{tenant.name}" firması güncellendi.')
+        messages.success(request, f'✅ "{tenant.name}" firması ve superuser bilgileri güncellendi.')
         return redirect('admin_home')
     
     # Admin panelinde sidebar rengi değişmemesi için tenant'ı None yap
@@ -1104,59 +1229,66 @@ def create_company(request):
                 }
             )
             
+            # Superuser kullanıcı adı ve şifre (varsayılan)
+            superuser_username = request.POST.get('superuser_username', f"{slug}_admin").strip()
+            superuser_password = request.POST.get('superuser_password', 'admin123').strip()
+            
             tenant = Tenant.objects.create(
                 name=name,
                 slug=slug,
                 email=email or 'info@example.com',
                 plan=default_plan,
                 primary_color=primary_color,
+                is_active=True,
+                superuser_username=superuser_username,
+                superuser_plain_password=superuser_password
+            )
+            
+            # Firma için superuser oluştur
+            User = get_user_model()
+            
+            # Tenant'ta kayıtlı kullanıcı adı ve şifreyi kullan
+            admin_username = tenant.superuser_username
+            admin_password = tenant.superuser_plain_password
+            
+            # Eğer bu username zaten varsa, farklı bir username kullan
+            counter = 1
+            original_admin_username = admin_username
+            while User.objects.filter(username=admin_username).exists():
+                admin_username = f"{original_admin_username}_{counter}"
+                counter += 1
+            
+            # Kullanıcı adı değiştiyse tenant'ı güncelle
+            if admin_username != tenant.superuser_username:
+                tenant.superuser_username = admin_username
+                tenant.save(update_fields=['superuser_username'])
+            
+            # Superuser oluştur
+            admin_user = User.objects.create(
+                username=admin_username,
+                user_code='admin',
+                first_name='Admin',
+                last_name=name,
+                email=email or f'admin@{slug}.fieldops.com',
+                tenant=tenant,
+                authority='Admin',
+                is_staff=True,
+                is_superuser=True,
                 is_active=True
             )
             
-            # Firma için default admin kullanıcısı oluştur
-            User = get_user_model()
-            root_admin = get_root_admin_user()
+            # Şifreyi set et
+            admin_user.set_password(admin_password)
+            admin_user.save()
             
-            if root_admin:
-                # Ana admin kullanıcısının şifresini al (hash'lenmiş)
-                admin_password_hash = root_admin.password
-                
-                # Firma için admin kullanıcısı oluştur
-                # Username: {slug}_admin formatında (global unique olmalı)
-                admin_username = f"{slug}_admin"
-                
-                # Eğer bu username zaten varsa, farklı bir username kullan
-                counter = 1
-                original_admin_username = admin_username
-                while User.objects.filter(username=admin_username).exists():
-                    admin_username = f"{original_admin_username}_{counter}"
-                    counter += 1
-                
-                # Admin kullanıcısını oluştur
-                admin_user = User.objects.create(
-                    username=admin_username,
-                    user_code='admin',
-                    first_name='Admin',
-                    last_name=name,
-                    email=email or f'admin@{slug}.fieldops.com',
-                    tenant=tenant,
-                    authority='Admin',
-                    is_staff=True,
-                    is_active=True
-                )
-                
-                # Ana admin'in şifre hash'ini direkt atayalım (aynı şifreyi kullanmak için)
-                admin_user.password = admin_password_hash
-                admin_user.save(update_fields=['password'])
-                
-                # Admin rolü oluştur (eğer yoksa)
-                admin_role, _ = UserRole.objects.get_or_create(
-                    name='Admin',
-                    tenant=tenant,
-                    defaults={'description': 'Firma yöneticisi'}
-                )
-                admin_user.role = admin_role
-                admin_user.save(update_fields=['role'])
+            # Admin rolü oluştur (eğer yoksa)
+            admin_role, _ = UserRole.objects.get_or_create(
+                name='Admin',
+                tenant=tenant,
+                defaults={'description': 'Firma yöneticisi'}
+            )
+            admin_user.role = admin_role
+            admin_user.save(update_fields=['role'])
             
             # Başarı mesajında subdomain bilgisi de göster
             messages.success(
@@ -1170,6 +1302,62 @@ def create_company(request):
     return redirect('admin_home')
 
 # --- EKSİK ADMIN KULLANICILARINI OLUŞTUR ---
+@login_required
+@root_admin_required
+def login_as_tenant_superuser(request, tenant_id):
+    """Root admin firmanın superuser'ı olarak giriş yapar"""
+    if not is_root_admin(request.user):
+        return HttpResponseForbidden("Bu işlem için yetkiniz yok.")
+    
+    tenant = get_object_or_404(Tenant, id=tenant_id)
+    
+    # Tenant'ın superuser kullanıcısını bul
+    User = get_user_model()
+    
+    # Önce tenant'ta kayıtlı superuser_username ile ara
+    superuser = None
+    if tenant.superuser_username:
+        superuser = User.objects.filter(username=tenant.superuser_username, tenant=tenant, is_superuser=True).first()
+    
+    # Bulunamazsa, tenant'ın admin kullanıcısını ara
+    if not superuser:
+        superuser = User.objects.filter(
+            tenant=tenant,
+            authority='Admin',
+            is_superuser=True
+        ).first()
+    
+    # Hala bulunamazsa, user_code='admin' ile ara
+    if not superuser:
+        superuser = User.objects.filter(
+            tenant=tenant,
+            user_code='admin',
+            is_superuser=True
+        ).first()
+    
+    if not superuser:
+        messages.error(
+            request, 
+            f'❌ "{tenant.name}" firması için superuser bulunamadı. '
+            f'Lütfen firma düzenleme sayfasından superuser bilgilerini kontrol edin.'
+        )
+        return redirect('admin_home')
+    
+    # Session'a tenant bilgilerini kaydet
+    request.session['connect_tenant_id'] = tenant.id
+    request.session['connect_tenant_slug'] = tenant.slug
+    request.session['connect_tenant_color'] = tenant.primary_color
+    request.session['connect_tenant_name'] = tenant.name
+    request.session['tenant_id'] = tenant.id
+    request.session['admin_from_panel'] = True  # Admin panelinden bağlandı
+    
+    # Superuser olarak giriş yap
+    auth_logout(request)  # Önce mevcut kullanıcıdan çıkış yap
+    login(request, superuser, backend='django.contrib.auth.backends.ModelBackend')
+    
+    messages.success(request, f'✅ "{tenant.name}" firmasına superuser olarak giriş yaptınız.')
+    return redirect('home')
+
 @login_required
 @root_admin_required
 def delete_tenant(request, tenant_id):
@@ -1518,24 +1706,10 @@ class CustomLoginView(LoginView):
         tenant_id = request.session.get('connect_tenant_id')
         tenant_slug = request.session.get('connect_tenant_slug') or self.kwargs.get('tenant_slug')
 
-        # Tüm firmaları al (silinenler dahil) - dropdown için
-        all_tenants = Tenant.objects.all().order_by('name')
-        
-        # Eğer tenant bilgisi yoksa, dropdown ile seçim yapılacak login sayfasını göster
+        # KURAL: Firma adıyla bağlanılmadan login ekranından sistem seçimi YOK.
         if not tenant_id or not tenant_slug:
-            # Logout sonrası gelindi mi kontrol et
-            from_tenant_logout = request.session.get('from_tenant_logout', False)
-            logout_tenant_name = request.session.get('logout_tenant_name', '')
-            
-            context = {
-                'tenant': None,  # Tenant yok, dropdown ile seçilecek
-                'all_tenants': all_tenants,  # Tüm firmalar dropdown için
-                'primary_color': '#667eea',  # Varsayılan renk
-                'from_tenant_logout': from_tenant_logout,
-                'logout_tenant_name': logout_tenant_name,
-                'show_tenant_dropdown': True,  # Dropdown göster
-            }
-            return render(request, 'registration/login_tenant.html', context)
+            messages.error(request, 'Lütfen önce firma adını girip "Bağlan" butonuna basın.')
+            return redirect('index')
 
         try:
             tenant = Tenant.objects.get(id=tenant_id, slug=tenant_slug, is_active=True)
@@ -1550,165 +1724,42 @@ class CustomLoginView(LoginView):
 
         context = {
             'tenant': tenant,
-            'all_tenants': all_tenants,  # Dropdown için tüm firmalar
             'primary_color': request.session.get('connect_tenant_color', tenant.primary_color),
             'from_tenant_logout': from_tenant_logout,
             'logout_tenant_name': logout_tenant_name,
-            'show_tenant_dropdown': False,  # Tenant seçilmiş, dropdown gösterme
         }
         return render(request, 'registration/login_tenant.html', context)
     
     def post(self, request, *args, **kwargs):
         username = request.POST.get('username', '').strip()
         password = request.POST.get('password', '')
-        
-        # Dropdown'dan seçilen değeri al
-        selected_tenant_option = request.POST.get('tenant_selection', '').strip()
-        
+
         User = get_user_model()
         root_admin = get_root_admin_user()
-        
-        # "Geliştirici" seçildiyse ana admin sistemine giriş yap
-        # Sadece açıkça 'developer' seçildiğinde bu mantık çalışsın
-        if selected_tenant_option == 'developer':
-            if root_admin and username == root_admin.username:
-                if root_admin.check_password(password):
-                    login(request, root_admin, backend='django.contrib.auth.backends.ModelBackend')
-                    # Session'ı temizle (admin panelinde tenant olmamalı)
-                    for key in ['tenant_id', 'connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel']:
-                        request.session.pop(key, None)
-                    messages.success(request, 'Ana admin sistemine başarıyla giriş yaptınız.')
-                    return redirect('admin_home')
-                else:
-                    messages.error(request, 'Kullanıcı adı veya şifre hatalı.')
-                    return redirect('login')
-            else:
-                messages.error(request, 'Geliştirici sistemine giriş için admin kullanıcı adı gereklidir.')
-                return redirect('login')
-        
-        # Tenant'ı belirle: Dropdown'dan seçildiyse onu kullan, yoksa session'dan al
+
+        # Tenant'ı sadece session'dan al (firma adıyla bağlanılmadan login yok)
         tenant = None
-        
-        # Önce dropdown'dan seçilen tenant'ı kontrol et
-        if selected_tenant_option and selected_tenant_option != '':
+        tenant_id = request.session.get('connect_tenant_id')
+        tenant_slug = request.session.get('connect_tenant_slug')
+        if tenant_id:
             try:
-                tenant = Tenant.objects.get(id=int(selected_tenant_option), is_active=True)
-            except (Tenant.DoesNotExist, ValueError, TypeError):
-                messages.error(request, 'Geçersiz firma seçimi.')
-                return redirect('login')
-        else:
-            # Dropdown'dan seçim yapılmamışsa, session'dan tenant bilgisini al
-            tenant_id = request.session.get('connect_tenant_id')
-            tenant_slug = request.session.get('connect_tenant_slug')
-            
-            if tenant_id:
-                try:
-                    tenant = Tenant.objects.get(id=tenant_id, is_active=True)
-                    # Slug'ı da kontrol et (güvenlik için)
-                    if tenant_slug and tenant.slug != tenant_slug:
-                        messages.error(request, 'Firma bilgisi uyumsuz. Lütfen tekrar firma adını girin.')
-                        return redirect('index')
-                except Tenant.DoesNotExist:
-                    messages.error(request, 'Firma bulunamadı. Lütfen tekrar firma adını girin.')
-                    # Session'ı temizle
-                    for key in ['connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name']:
-                        request.session.pop(key, None)
+                tenant = Tenant.objects.get(id=tenant_id, is_active=True)
+                if tenant_slug and tenant.slug != tenant_slug:
+                    messages.error(request, 'Firma bilgisi uyumsuz. Lütfen tekrar firma adını girin.')
                     return redirect('index')
-            else:
-                messages.error(request, 'Lütfen bir firma seçin veya firma adını girin.')
+            except Tenant.DoesNotExist:
+                messages.error(request, 'Firma bulunamadı. Lütfen tekrar firma adını girin.')
+                for key in ['connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name']:
+                    request.session.pop(key, None)
                 return redirect('index')
+        else:
+            messages.error(request, 'Lütfen önce firma adını girip "Bağlan" butonuna basın.')
+            return redirect('index')
         
         # Tenant bulunamadıysa hata ver
         if not tenant:
             messages.error(request, 'Firma bilgisi bulunamadı. Lütfen tekrar deneyin.')
             return redirect('index')
-        
-        # Root admin kullanıcı adı ve şifresi ile giriş yapılıyorsa, o firmanın admin kullanıcısına giriş yap
-        if root_admin and username == root_admin.username:
-            if root_admin.check_password(password):
-                # O firmanın admin kullanıcısını bul - daha esnek arama
-                # Önce tam eşleşme dene
-                tenant_admin = User.objects.filter(
-                    tenant=tenant,
-                    user_code='admin',
-                    authority='Admin'
-                ).first()
-                
-                # Eğer bulunamazsa, username ile başlayanları ara
-                if not tenant_admin:
-                    tenant_admin = User.objects.filter(
-                        username__startswith=f"{tenant.slug}_admin",
-                        tenant=tenant
-                    ).first()
-                
-                # Hala bulunamazsa, sadece tenant ve admin koduna göre ara
-                if not tenant_admin:
-                    tenant_admin = User.objects.filter(
-                        tenant=tenant,
-                        user_code='admin'
-                    ).first()
-                
-                if tenant_admin:
-                    # O firmanın admin kullanıcısına giriş yap
-                    login(request, tenant_admin, backend='django.contrib.auth.backends.ModelBackend')
-                    # Session'a tenant bilgisini kaydet
-                    request.session['tenant_id'] = tenant.id
-                    request.session['connect_tenant_id'] = tenant.id
-                    request.session['connect_tenant_slug'] = tenant.slug
-                    request.session['connect_tenant_color'] = tenant.primary_color
-                    request.session['connect_tenant_name'] = tenant.name
-                    messages.success(request, f'"{tenant.name}" firmasına başarıyla giriş yaptınız.')
-                    return redirect('home')
-                else:
-                    # Admin kullanıcısı yoksa otomatik oluştur
-                    admin_username = f"{tenant.slug}_admin"
-                    
-                    # Eğer bu username zaten varsa, farklı bir username kullan
-                    counter = 1
-                    original_admin_username = admin_username
-                    while User.objects.filter(username=admin_username).exists():
-                        admin_username = f"{original_admin_username}_{counter}"
-                        counter += 1
-                    
-                    # Admin kullanıcısını oluştur
-                    tenant_admin = User.objects.create(
-                        username=admin_username,
-                        user_code='admin',
-                        first_name='Admin',
-                        last_name=tenant.name,
-                        email=tenant.email or f'admin@{tenant.slug}.fieldops.com',
-                        tenant=tenant,
-                        authority='Admin',
-                        is_staff=True,
-                        is_active=True
-                    )
-                    
-                    # Ana admin'in şifre hash'ini direkt atayalım
-                    tenant_admin.password = root_admin.password
-                    tenant_admin.save(update_fields=['password'])
-                    
-                    # Admin rolü oluştur (eğer yoksa)
-                    admin_role, _ = UserRole.objects.get_or_create(
-                        name='Admin',
-                        tenant=tenant,
-                        defaults={'description': 'Firma yöneticisi'}
-                    )
-                    tenant_admin.role = admin_role
-                    tenant_admin.save(update_fields=['role'])
-                    
-                    # Oluşturulan admin kullanıcısına giriş yap
-                    login(request, tenant_admin, backend='django.contrib.auth.backends.ModelBackend')
-                    # Session'a tenant bilgisini kaydet
-                    request.session['tenant_id'] = tenant.id
-                    request.session['connect_tenant_id'] = tenant.id
-                    request.session['connect_tenant_slug'] = tenant.slug
-                    request.session['connect_tenant_color'] = tenant.primary_color
-                    request.session['connect_tenant_name'] = tenant.name
-                    messages.success(request, f'"{tenant.name}" firması için admin kullanıcısı otomatik olarak oluşturuldu ve giriş yapıldı.')
-                    return redirect('home')
-            else:
-                messages.error(request, 'Kullanıcı adı veya şifre hatalı.')
-                return redirect('login')
         
         # Root admin değilse, normal kullanıcı girişi yap
         # Firma seçildi, normal kullanıcı girişi yapılabilir
@@ -1724,20 +1775,32 @@ class CustomLoginView(LoginView):
                 break
         
         if user is not None and user.is_active:
-            # Root admin kontrolü - root admin burada zaten handle edildi, buraya gelmemeli
             from apps.users.utils import is_root_admin
-            
+
+            # KURAL 1: Root admin kullanıcı sadece Rotexia tenant'ında giriş yapabilir.
+            if is_root_admin(user):
+                # Rotexia tenant'ı kontrolü (slug veya name ile)
+                rotexia_slugs = ['rotexia', 'sistem', 'admin']
+                if tenant.slug.lower() not in rotexia_slugs and tenant.name.lower() not in ['rotexia', 'sistem', 'admin']:
+                    messages.error(
+                        request,
+                        'Bu kullanıcı sadece "Rotexia" sistemi için kullanılabilir. '
+                        'Lütfen firma adını "Rotexia" yazıp bağlanarak giriş yapın.'
+                    )
+                    return redirect('index')
+
+            # KURAL 2: Tüm tenant kullanıcıları (superuser dahil) kesinlikle kendi tenant'ı dışında giriş yapamaz.
+            # ÖNEMLİ: Tenant'a bağlı superuser'lar da (pasteladmin gibi) root admin DEĞİLDİR!
             if not is_root_admin(user):
-                # Normal kullanıcı için tenant kontrolü
-                if hasattr(user, 'tenant') and user.tenant:
-                    if user.tenant != tenant:
-                        messages.error(request, f'Bu kullanıcı "{user.tenant.name}" firmasına aittir. Lütfen doğru firmayı seçin.')
-                        return redirect('login')
-                else:
-                    # Kullanıcının tenant'ı yoksa, seçilen tenant'ı ata
-                    user.tenant = tenant
-                    user.save()
-                    messages.info(request, f'Kullanıcınız "{tenant.name}" firmasına atandı.')
+                # Kullanıcının tenant'ı yoksa hata ver
+                if not hasattr(user, 'tenant') or not user.tenant:
+                    messages.error(request, 'Bu kullanıcı bir firmaya atanmamış. Lütfen yöneticiniz ile iletişime geçin.')
+                    return redirect('index')
+                
+                # Kullanıcının tenant'ı seçilen tenant ile eşleşmeli
+                if user.tenant != tenant:
+                    messages.error(request, f'Bu kullanıcı "{user.tenant.name}" firmasına aittir. Lütfen doğru firmayı seçin.')
+                    return redirect('index')
             
             login(request, user, backend='django.contrib.auth.backends.ModelBackend')
             # Session'a tenant bilgisini kaydet
@@ -1767,143 +1830,32 @@ class CustomLoginView(LoginView):
             messages.error(request, 'Kullanıcı adı veya şifre hatalı.')
         
         return redirect('login')
-        
-        # Eski mantık: Session'dan tenant bilgisi al (geriye dönük uyumluluk)
-        # Eğer dropdown'dan seçim yapılmadıysa session'dan al
-        if not selected_tenant_option or selected_tenant_option == '':
-            tenant_id = request.session.get('connect_tenant_id')
-            tenant_slug = request.session.get('connect_tenant_slug') or request.POST.get('tenant_slug', '').strip()
-
-            if not tenant_id or not tenant_slug:
-                messages.error(request, 'Lütfen bir sistem seçin.')
-                return redirect('login')
-
-            try:
-                tenant = Tenant.objects.get(id=tenant_id, slug=tenant_slug, is_active=True)
-            except Tenant.DoesNotExist:
-                messages.error(request, 'Firma bulunamadı. Lütfen tekrar deneyin.')
-                for key in ['connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name']:
-                    request.session.pop(key, None)
-                return redirect('login')
-            
-            # Eski mantıkta da root admin kontrolü yap
-            if root_admin and username == root_admin.username:
-                if root_admin.check_password(password):
-                    # O firmanın admin kullanıcısını bul - daha esnek arama
-                    tenant_admin = User.objects.filter(
-                        tenant=tenant,
-                        user_code='admin',
-                        authority='Admin'
-                    ).first()
-                    
-                    if not tenant_admin:
-                        tenant_admin = User.objects.filter(
-                            username__startswith=f"{tenant.slug}_admin",
-                            tenant=tenant
-                        ).first()
-                    
-                    if not tenant_admin:
-                        tenant_admin = User.objects.filter(
-                            tenant=tenant,
-                            user_code='admin'
-                        ).first()
-                    
-                    if tenant_admin:
-                        login(request, tenant_admin, backend='django.contrib.auth.backends.ModelBackend')
-                        request.session['tenant_id'] = tenant.id
-                        request.session['connect_tenant_id'] = tenant.id
-                        request.session['connect_tenant_slug'] = tenant.slug
-                        request.session['connect_tenant_color'] = tenant.primary_color
-                        request.session['connect_tenant_name'] = tenant.name
-                        messages.success(request, f'"{tenant.name}" firmasına başarıyla giriş yaptınız.')
-                        return redirect('home')
-                    else:
-                        # Admin kullanıcısı yoksa hata ver (güvenlik için otomatik oluşturma yok)
-                        messages.error(request, f'Bu firma için admin kullanıcısı bulunamadı. Lütfen admin paneline gidin ve firmayı kontrol edin veya firmayı yeniden oluşturun.')
-                        return redirect('login')
-                else:
-                    messages.error(request, 'Kullanıcı adı veya şifre hatalı.')
-                    return redirect('login')
-        
-        # Artık tenant bilgisi var, normal kullanıcı girişi yapılabilir
-        
-        # Username'i tenant slug ile birleştir (örn: Merch1 -> pastel_Merch1)
-        # Önce direkt username'i dene, sonra tenant slug ile birleştirilmiş halini dene
-        user = None
-        username_attempts = [
-            f"{tenant.slug}_{username}",  # pastel_Merch1
-            username,  # Merch1 (eski kullanıcılar için)
-        ]
-        
-        for username_attempt in username_attempts:
-            user = authenticate(request, username=username_attempt, password=password)
-            if user is not None:
-                break
-        
-        if user is not None and user.is_active:
-            # Root admin kontrolü - root admin her tenant'a giriş yapabilir
-            from apps.users.utils import is_root_admin
-            
-            if not is_root_admin(user):
-                # Normal kullanıcı için MUTLAKA tenant kontrolü
-                # Kullanıcının tenant'ı yoksa giriş yapamaz
-                if not hasattr(user, 'tenant') or not user.tenant:
-                    messages.error(request, 'Bu kullanıcı henüz bir firmaya atanmamış. Lütfen yönetici ile iletişime geçin.')
-                    tenant_slug = request.POST.get('tenant_slug', '').strip()
-                    if tenant_slug:
-                        return redirect('login_with_tenant', tenant_slug=tenant_slug)
-                    return redirect('index')
-                
-                # Kullanıcının tenant'ı seçilen tenant ile eşleşmeli
-                if user.tenant != tenant:
-                    messages.error(request, f'Bu kullanıcı "{user.tenant.name}" firmasına aittir. Lütfen doğru firmayı seçin.')
-                    return self.form_invalid(self.get_form())
-            
-            login(request, user)
-            
-            # Session'a tenant bilgisini kaydet (development'ta subdomain olmadığı için gerekli)
-            request.session['tenant_id'] = tenant.id
-            # connect_tenant_id'yi de koru (middleware için)
-            request.session['connect_tenant_id'] = tenant.id
-            request.session['connect_tenant_slug'] = tenant.slug
-            request.session.modified = True
-            request.session.save()
-            
-            # Admin panelinden bağlanıldıysa, admin_from_panel flag'ini kaldır
-            if request.session.get('admin_from_panel'):
-                request.session.pop('admin_from_panel', None)
-            
-            # Logout flag'lerini temizle
-            for key in ['from_tenant_logout', 'logout_tenant_slug', 'logout_tenant_name']:
-                request.session.pop(key, None)
-            
-            # Bağlanma session bilgilerini temizleme - tenant_id'yi koruyoruz
-            # Sadece gereksiz olanları temizle
-            request.session.pop('connect_tenant_color', None)
-            request.session.pop('connect_tenant_name', None)
-
-            # Development'ta subdomain kullanmıyoruz, direkt home'a yönlendir
-            # Production'da subdomain kullanılabilir
-            if settings.DEBUG:
-                redirect_url = f"/home/"
-            else:
-                domain = getattr(settings, 'SUBDOMAIN_DOMAIN', None)
-                if domain:
-                    protocol = 'https' if not settings.DEBUG else 'http'
-                    redirect_url = f"{protocol}://{tenant.slug}.{domain}/home/"
-                else:
-                    redirect_url = '/home/'
-
-            return redirect(redirect_url)
-
-        messages.error(request, 'Kullanıcı adı veya şifre hatalı.')
-        return self.form_invalid(self.get_form())
 
 # --- GELİŞTİRİCİ ADMIN GİRİŞİ ---
 @method_decorator(csrf_protect, name='dispatch')
 class AdminLoginView(LoginView):
     template_name = 'registration/admin_login.html'
     redirect_authenticated_user = False  # Her zaman giriş yapılmasını iste
+
+    def post(self, request, *args, **kwargs):
+        """Root admin girişi: sadece root admin kullanıcıları kabul edilir."""
+        username = request.POST.get('username', '').strip()
+        password = request.POST.get('password', '')
+
+        user = authenticate(request, username=username, password=password)
+        if user is None or not user.is_active:
+            messages.error(request, 'Kullanıcı adı veya şifre hatalı.')
+            return self.form_invalid(self.get_form())
+
+        if not is_root_admin(user):
+            messages.error(request, 'Bu giriş ekranı sadece ana sistem (Rotexia) yöneticisi içindir.')
+            return self.form_invalid(self.get_form())
+
+        login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+        # Admin girişinde tenant session'ını temizle (kesin kural)
+        for key in ['tenant_id', 'connect_tenant_id', 'connect_tenant_slug', 'connect_tenant_color', 'connect_tenant_name', 'admin_from_panel']:
+            request.session.pop(key, None)
+        return redirect(self.get_success_url())
     
     def get_success_url(self):
         # Root admin kontrolü
@@ -1921,23 +1873,35 @@ def mobile_home(request):
     # Not: HierarchyScope.usernames boş ise (Admin/superuser) "herkesi görür" anlamına gelir.
     has_team = bool(scope_no_self.usernames) or getattr(user, "is_superuser", False) or getattr(user, "authority", None) == "Admin"
     
-    # Aktif ziyaret var mı kontrol et (check_in_time var ama check_out_time yok)
-    active_visit = VisitTask.objects.filter(
+    # Tenant kontrolü - sadece kullanıcının tenant'ına ait verileri göster
+    tenant = getattr(request, 'tenant', None)
+    if not tenant and hasattr(user, 'tenant') and user.tenant:
+        tenant = user.tenant
+    
+    # Aktif ziyaret var mı kontrol et (check_in_time var ama check_out_time yok) - tenant filtresi ile
+    active_visit_qs = VisitTask.objects.filter(
         merch_code=user.username,
         check_in_time__isnull=False,
         check_out_time__isnull=True,
         status__in=['pending', 'missed']  # completed değilse aktif
-    ).first()
+    )
+    if tenant:
+        active_visit_qs = active_visit_qs.filter(tenant=tenant)
+    active_visit = active_visit_qs.first()
     
     # Eğer aktif ziyaret varsa uyarı göster
     if active_visit:
         from django.contrib import messages
         messages.warning(request, f'Devam eden bir ziyaret var: {active_visit.customer.name}. Lütfen önce bu ziyareti tamamlayın.')
     
-    tasks = VisitTask.objects.filter(
+    # Görevleri al - tenant filtresi ile
+    tasks_qs = VisitTask.objects.filter(
         merch_code=user.username,
         planned_date=today
-    ).select_related('customer').order_by('status', 'customer__name')
+    )
+    if tenant:
+        tasks_qs = tasks_qs.filter(tenant=tenant)
+    tasks = tasks_qs.select_related('customer').order_by('status', 'customer__name')
     
     total_tasks = tasks.count()
     completed_tasks = tasks.filter(status='completed').count()
@@ -2158,8 +2122,21 @@ def mobile_task_detail(request, pk):
     Mağaza bilgisi + Formlar + Başlat Butonu
     Filtreleme: Tüm filtreler AND mantığıyla çalışır (şartlı)
     """
-    task = get_object_or_404(VisitTask, pk=pk)
     user = request.user
+    
+    # Tenant kontrolü - sadece kullanıcının tenant'ına ait görevleri göster
+    tenant = getattr(request, 'tenant', None)
+    if not tenant and hasattr(user, 'tenant') and user.tenant:
+        tenant = user.tenant
+    
+    # Tenant filtresi ile task'ı al
+    if tenant:
+        task = get_object_or_404(VisitTask, pk=pk, tenant=tenant)
+    else:
+        task = get_object_or_404(VisitTask, pk=pk)
+        # Tenant yoksa ama task'ın tenant'ı varsa erişim yok
+        if hasattr(task, 'tenant') and task.tenant:
+            return HttpResponseForbidden("Bu görevi görüntüleme yetkiniz yok.")
     customer = task.customer
     # Görevin sahibi (form filtreleri ve cevap görüntüleme için)
     task_user = get_user_model().objects.filter(username=task.merch_code).first() or user
@@ -2171,8 +2148,17 @@ def mobile_task_detail(request, pk):
     # Aksiyon (ziyaret başlat/bitir, form doldur) sadece görevin sahibinde olmalı
     can_act = (task.merch_code == user.username)
     
-    # Aktif anketleri başlangıç olarak al
-    surveys = Survey.objects.filter(is_active=True)
+    # Tenant kontrolü - sadece kullanıcının tenant'ına ait anketleri göster
+    tenant = getattr(request, 'tenant', None)
+    if not tenant and hasattr(user, 'tenant') and user.tenant:
+        tenant = user.tenant
+    
+    # Aktif anketleri başlangıç olarak al - tenant filtresi ile
+    if tenant:
+        surveys = Survey.objects.filter(is_active=True, tenant=tenant)
+    else:
+        # Tenant yoksa boş liste (güvenlik)
+        surveys = Survey.objects.none()
     
     # Tarih kontrolü
     from datetime import date
@@ -2292,8 +2278,19 @@ def mobile_view_survey(request, task_id, survey_id):
     Düzenleme yoktur.
     """
     task = get_object_or_404(VisitTask, pk=task_id)
-    survey = get_object_or_404(Survey, pk=survey_id)
     user = request.user
+    
+    # Tenant kontrolü - sadece kullanıcının tenant'ına ait anketleri göster
+    tenant = getattr(request, 'tenant', None)
+    if not tenant and hasattr(user, 'tenant') and user.tenant:
+        tenant = user.tenant
+    
+    # Tenant filtresi ile survey'yi al
+    if tenant:
+        survey = get_object_or_404(Survey, pk=survey_id, tenant=tenant)
+    else:
+        # Tenant yoksa erişim yok
+        return HttpResponseForbidden("Bu formu görüntüleme yetkiniz yok.")
 
     scope = get_hierarchy_scope_for_user(user, include_self=True)
     if scope.usernames and task.merch_code not in scope.usernames:
@@ -2330,9 +2327,22 @@ def mobile_view_survey(request, task_id, survey_id):
 @login_required
 def mobile_fill_survey(request, task_id, survey_id):
     task = get_object_or_404(VisitTask, pk=task_id)
-    survey = get_object_or_404(Survey, pk=survey_id)
+    user = request.user
+    
+    # Tenant kontrolü - sadece kullanıcının tenant'ına ait anketleri göster
+    tenant = getattr(request, 'tenant', None)
+    if not tenant and hasattr(user, 'tenant') and user.tenant:
+        tenant = user.tenant
+    
+    # Tenant filtresi ile survey'yi al
+    if tenant:
+        survey = get_object_or_404(Survey, pk=survey_id, tenant=tenant)
+    else:
+        # Tenant yoksa erişim yok
+        return HttpResponseForbidden("Bu formu doldurma yetkiniz yok.")
+    
     # Sadece görevin sahibi form doldurabilir
-    if task.merch_code != request.user.username:
+    if task.merch_code != user.username:
         return HttpResponseForbidden("Bu görevin formunu doldurma yetkiniz yok.")
     
     # Ana soruları al (parent_question veya dependency_question olmayanlar)
@@ -2450,7 +2460,9 @@ def mobile_fill_survey(request, task_id, survey_id):
 
     context = {
         'task': task,
+        'task_id': task.id,  # Template için task_id ekle
         'survey': survey,
+        'survey_id': survey.id,  # Template için survey_id ekle
         'questions_data': questions_data,
         'required_questions': required_questions,
         'missing_required': missing_required,
@@ -2695,8 +2707,19 @@ def check_required_surveys(request, task_id):
     if task.merch_code != request.user.username:
         return JsonResponse({'success': False, 'message': 'Yetkisiz.'}, status=403)
     
-    # Bu görev için gösterilen tüm anketleri al
+    # Bu görev için gösterilen tüm anketleri al - Tenant filtresi ekle
+    task_tenant = task.customer.tenant if task.customer and task.customer.tenant else None
     surveys = Survey.objects.filter(is_active=True)
+    
+    # Tenant filtresi: Sadece bu görevin tenant'ına ait anketleri al
+    if task_tenant:
+        surveys = surveys.filter(tenant=task_tenant)
+    else:
+        # Tenant yoksa, kullanıcının tenant'ını kullan
+        user_tenant = getattr(request.user, 'tenant', None)
+        if user_tenant:
+            surveys = surveys.filter(tenant=user_tenant)
+    
     from datetime import date
     today = date.today()
     surveys = surveys.filter(
@@ -2777,8 +2800,19 @@ def finish_visit(request, task_id):
     if task.merch_code != request.user.username:
         return JsonResponse({'success': False, 'message': 'Bu ziyareti bitirme yetkiniz yok.'}, status=403)
     
-    # Zorunlu anketleri kontrol et
+    # Zorunlu anketleri kontrol et - Tenant filtresi ekle
+    task_tenant = task.customer.tenant if task.customer and task.customer.tenant else None
     surveys = Survey.objects.filter(is_active=True)
+    
+    # Tenant filtresi: Sadece bu görevin tenant'ına ait anketleri al
+    if task_tenant:
+        surveys = surveys.filter(tenant=task_tenant)
+    else:
+        # Tenant yoksa, kullanıcının tenant'ını kullan
+        user_tenant = getattr(request.user, 'tenant', None)
+        if user_tenant:
+            surveys = surveys.filter(tenant=user_tenant)
+    
     from datetime import date
     today = date.today()
     surveys = surveys.filter(
@@ -3022,3 +3056,975 @@ def mobile_team_member(request, merch_code: str):
         "completed": completed,
     }
     return render(request, "mobile/team_member_tasks.html", ctx)
+
+# --- OTOMATIK MAIL YÖNETİMİ ---
+from apps.core.models import AutomatedEmail
+from apps.core.tenant_utils import set_tenant_on_save
+from django.urls import reverse
+
+def _resolve_tenant_for_automated_email(request):
+    """Request'ten tenant'ı çözümler (root admin veya normal kullanıcı için)"""
+    from apps.core.tenant_utils import get_current_tenant
+    tenant = getattr(request, 'tenant', None)
+    if not tenant:
+        tenant = get_current_tenant(request)
+    return tenant
+
+def _get_available_reports_for_tenant(tenant):
+    """
+    Tenant için mevcut raporları hiyerarşik yapıda döndürür
+    Sadece "Raporlar" bölümündeki raporlar: Detaylı Ziyaret, Günlük Özet, Anket Raporları
+    """
+    from django.contrib.contenttypes.models import ContentType
+    from apps.field_operations.models import ReportRecord
+    from apps.forms.models import Survey
+    
+    reports_list = []
+    
+    # 1. Detaylı Ziyaret Raporu
+    reports_list.append({
+        'key': 'visit_detail',
+        'name': 'Detaylı Ziyaret Raporu',
+        'description': 'Tüm ziyaret detaylarını içeren kapsamlı rapor',
+        'type': 'single'
+    })
+    
+    # 2. Günlük Özet Raporu
+    reports_list.append({
+        'key': 'daily_summary',
+        'name': 'Günlük Özet Raporu',
+        'description': 'Günlük ziyaret özet raporu',
+        'type': 'single'
+    })
+    
+    # 3. Anket Raporları grubu (ReportRecord sisteminden)
+    ct = ContentType.objects.get_for_model(Survey)
+    survey_report_records = ReportRecord.objects.filter(
+        tenant=tenant,
+        report_type='survey',
+        content_type=ct,
+        deleted_at__isnull=True
+    ).order_by('title')
+    
+    if survey_report_records.exists():
+        survey_reports = []
+        for record in survey_report_records:
+            try:
+                survey = Survey.objects.get(id=record.object_id, tenant=tenant)
+                survey_reports.append({
+                    'key': f'survey_{survey.id}',
+                    'name': survey.title,
+                    'description': f'Anket: {survey.title}',
+                    'type': 'single'
+                })
+            except Survey.DoesNotExist:
+                continue
+        
+        if survey_reports:
+            reports_list.append({
+                'key': 'survey_group',
+                'name': 'Anket Raporları',
+                'description': 'Anket sonuçlarını içeren raporlar',
+                'type': 'group',
+                'children': survey_reports
+            })
+    
+    return reports_list
+
+@login_required
+def automated_email_list(request):
+    is_admin_panel = getattr(request, 'is_admin_panel', False)
+    is_root = is_root_admin(request.user)
+    
+    # selected_tenant_id'yi başlangıçta None olarak tanımla
+    selected_tenant_id = None
+
+    if is_root and is_admin_panel:
+        selected_tenant_id = request.GET.get('tenant_id')
+        if selected_tenant_id:
+            tenant = get_object_or_404(Tenant, id=selected_tenant_id, is_active=True)
+        else:
+            tenant = None
+        all_tenants = Tenant.objects.filter(is_active=True).order_by('name')
+    else:
+        tenant = _resolve_tenant_for_automated_email(request)
+        all_tenants = []
+    
+    if not tenant and not is_root:
+        messages.error(request, "Firma bilgisi bulunamadı.")
+        return redirect("home")
+    elif not tenant and is_root and not selected_tenant_id:
+        automated_emails = AutomatedEmail.objects.none()
+        available_reports = []
+    else:
+        automated_emails = AutomatedEmail.objects.filter(tenant=tenant).order_by("-created_at")
+        available_reports = _get_available_reports_for_tenant(tenant)
+
+    context = {
+        "automated_emails": automated_emails,
+        "available_reports": available_reports,
+        "tenant": tenant,
+        "is_root_admin": is_root,
+        "all_tenants": all_tenants,
+        "selected_tenant_id": int(selected_tenant_id) if selected_tenant_id else None,
+    }
+    return render(request, "apps/core/automated_email_list.html", context)
+
+@login_required
+def automated_email_create(request):
+    is_root = is_root_admin(request.user)
+    is_admin_panel = getattr(request, 'is_admin_panel', False)
+
+    if is_root and is_admin_panel:
+        all_tenants = Tenant.objects.filter(is_active=True).order_by('name')
+        selected_tenant_id = request.POST.get('tenant_id') if request.method == 'POST' else request.GET.get('tenant_id')
+        if selected_tenant_id:
+            tenant = get_object_or_404(Tenant, id=selected_tenant_id, is_active=True)
+        else:
+            tenant = None
+    else:
+        tenant = _resolve_tenant_for_automated_email(request)
+        all_tenants = []
+        selected_tenant_id = None
+
+    if not tenant:
+        messages.error(request, "Lütfen önce bir firma seçin.")
+        if is_root and is_admin_panel:
+            return redirect('automated_email_list')
+        return redirect("home")
+
+    available_reports = _get_available_reports_for_tenant(tenant)
+
+    if request.method == "POST":
+        to_email = request.POST.get('to_email', '').strip()
+        cc_email = request.POST.get('cc_email', '').strip()
+        subject = request.POST.get('subject', '').strip()
+        body = request.POST.get('body', '').strip()
+        
+        selected_reports = {}
+        # Template'de name="selected_reports" olarak gönderiliyor, value attribute'undan rapor key'ini al
+        selected_report_keys = request.POST.getlist('selected_reports')
+        for report_key in selected_report_keys:
+            if report_key:  # Boş değilse
+                selected_reports[report_key] = True
+        
+        merge_reports = request.POST.get('merge_reports') == 'on'
+        
+        # Tarih alanları - boş string kontrolü (Django DateField boş string kabul etmez)
+        report_start_date = request.POST.get('report_start_date', '').strip() or None
+        report_end_date = request.POST.get('report_end_date', '').strip() or None
+        send_start_date = request.POST.get('send_start_date', '').strip() or None
+        send_end_date = request.POST.get('send_end_date', '').strip() or None
+        period = request.POST.get('period')
+        day_option = request.POST.get('day_option') or None
+        send_time = request.POST.get('send_time')
+        
+        if not to_email or not subject or not body:
+            messages.error(request, "Kime, Konu ve Mail İçeriği alanları zorunludur.")
+            return render(request, "apps/core/automated_email_form.html", {
+                "available_reports": available_reports,
+                "tenant": tenant,
+                "is_root_admin": is_root,
+                "all_tenants": all_tenants,
+                "selected_tenant_id": selected_tenant_id,
+            })
+        
+        if not selected_reports:
+            messages.error(request, "En az bir rapor seçmelisiniz.")
+            return render(request, "apps/core/automated_email_form.html", {
+                "available_reports": available_reports,
+                "tenant": tenant,
+                "is_root_admin": is_root,
+                "all_tenants": all_tenants,
+                "selected_tenant_id": selected_tenant_id,
+            })
+        
+        # Tarih validasyonu - zorunlu alanlar
+        if not report_start_date:
+            messages.error(request, "Rapor Başlangıç Tarihi zorunludur.")
+            return render(request, "apps/core/automated_email_form.html", {
+                "available_reports": available_reports,
+                "tenant": tenant,
+                "is_root_admin": is_root,
+                "all_tenants": all_tenants,
+                "selected_tenant_id": selected_tenant_id,
+            })
+        
+        if not report_end_date:
+            messages.error(request, "Rapor Bitiş Tarihi zorunludur.")
+            return render(request, "apps/core/automated_email_form.html", {
+                "available_reports": available_reports,
+                "tenant": tenant,
+                "is_root_admin": is_root,
+                "all_tenants": all_tenants,
+                "selected_tenant_id": selected_tenant_id,
+            })
+        
+        if not send_start_date:
+            messages.error(request, "Gönderim Başlangıç Tarihi zorunludur.")
+            return render(request, "apps/core/automated_email_form.html", {
+                "available_reports": available_reports,
+                "tenant": tenant,
+                "is_root_admin": is_root,
+                "all_tenants": all_tenants,
+                "selected_tenant_id": selected_tenant_id,
+            })
+        
+        if is_root and is_admin_panel:
+            tenant_id_from_post = request.POST.get('tenant_id')
+            if not tenant_id_from_post:
+                messages.error(request, "Lütfen bir firma seçin.")
+                return render(request, "apps/core/automated_email_form.html", {
+                    "available_reports": available_reports,
+                    "tenant": tenant,
+                    "is_root_admin": is_root,
+                    "all_tenants": all_tenants,
+                    "selected_tenant_id": selected_tenant_id,
+                })
+            tenant_to_save = get_object_or_404(Tenant, id=tenant_id_from_post, is_active=True)
+        else:
+            tenant_to_save = tenant
+        
+        is_active = request.POST.get('is_active') == 'on'
+        
+        automated = AutomatedEmail.objects.create(
+            tenant=tenant_to_save,
+            to_email=to_email,
+            cc_email=cc_email if cc_email else None,
+            subject=subject,
+            body=body,
+            selected_reports=selected_reports,
+            merge_reports=merge_reports,
+            report_start_date=report_start_date,
+            report_end_date=report_end_date,
+            send_start_date=send_start_date,
+            send_end_date=send_end_date if send_end_date else None,
+            period=period,
+            day_option=day_option,
+            send_time=send_time,
+            is_active=is_active,
+            created_by=request.user,
+        )
+        messages.success(request, "Otomatik mail başarıyla oluşturuldu.")
+        return redirect("automated_email_list")
+
+    context = {
+        "available_reports": available_reports,
+        "tenant": tenant,
+        "is_root_admin": is_root,
+        "all_tenants": all_tenants,
+        "selected_tenant_id": int(selected_tenant_id) if selected_tenant_id else None,
+    }
+    return render(request, "apps/core/automated_email_form.html", context)
+
+@login_required
+def automated_email_edit(request, pk):
+    automated_email = get_object_or_404(AutomatedEmail, pk=pk)
+    
+    is_root = is_root_admin(request.user)
+    if not is_root and automated_email.tenant != _resolve_tenant_for_automated_email(request):
+        messages.error(request, "Bu otomatik maili düzenleme yetkiniz yok.")
+        return redirect("automated_email_list")
+    
+    tenant = automated_email.tenant
+    available_reports = _get_available_reports_for_tenant(tenant)
+    is_admin_panel = getattr(request, 'is_admin_panel', False)
+    all_tenants = Tenant.objects.filter(is_active=True).order_by('name') if is_root and is_admin_panel else []
+
+    if request.method == "POST":
+        automated_email.to_email = request.POST.get('to_email', '').strip()
+        automated_email.cc_email = request.POST.get('cc_email', '').strip()
+        automated_email.subject = request.POST.get('subject', '').strip()
+        automated_email.body = request.POST.get('body', '').strip()
+        
+        selected_reports = {}
+        # Template'de name="selected_reports" olarak gönderiliyor, value attribute'undan rapor key'ini al
+        selected_report_keys = request.POST.getlist('selected_reports')
+        for report_key in selected_report_keys:
+            if report_key:  # Boş değilse
+                selected_reports[report_key] = True
+        
+        automated_email.selected_reports = selected_reports
+        automated_email.merge_reports = request.POST.get('merge_reports') == 'on'
+        
+        # Tarih alanları - boş string kontrolü (Django DateField boş string kabul etmez)
+        report_start_date = request.POST.get('report_start_date', '').strip() or None
+        report_end_date = request.POST.get('report_end_date', '').strip() or None
+        send_start_date = request.POST.get('send_start_date', '').strip() or None
+        send_end_date = request.POST.get('send_end_date', '').strip() or None
+        
+        # Zorunlu alanlar için validation
+        if not report_start_date:
+            messages.error(request, "Rapor Başlangıç Tarihi zorunludur.")
+            return render(request, "apps/core/automated_email_form.html", {
+                "automated_email": automated_email,
+                "available_reports": available_reports,
+                "tenant": tenant,
+                "is_root_admin": is_root,
+                "all_tenants": all_tenants,
+            })
+        
+        if not report_end_date:
+            messages.error(request, "Rapor Bitiş Tarihi zorunludur.")
+            return render(request, "apps/core/automated_email_form.html", {
+                "automated_email": automated_email,
+                "available_reports": available_reports,
+                "tenant": tenant,
+                "is_root_admin": is_root,
+                "all_tenants": all_tenants,
+            })
+        
+        if not send_start_date:
+            messages.error(request, "Gönderim Başlangıç Tarihi zorunludur.")
+            return render(request, "apps/core/automated_email_form.html", {
+                "automated_email": automated_email,
+                "available_reports": available_reports,
+                "tenant": tenant,
+                "is_root_admin": is_root,
+                "all_tenants": all_tenants,
+            })
+        
+        automated_email.report_start_date = report_start_date
+        automated_email.report_end_date = report_end_date
+        automated_email.send_start_date = send_start_date
+        automated_email.send_end_date = send_end_date
+        automated_email.period = request.POST.get('period')
+        automated_email.day_option = request.POST.get('day_option') or None
+        automated_email.send_time = request.POST.get('send_time')
+        automated_email.is_active = request.POST.get('is_active') == 'on'
+        
+        automated_email.save()
+        messages.success(request, "Otomatik mail başarıyla güncellendi.")
+        return redirect("automated_email_list")
+
+    context = {
+        "automated_email": automated_email,
+        "available_reports": available_reports,
+        "tenant": tenant,
+        "is_root_admin": is_root,
+        "all_tenants": all_tenants,
+    }
+    return render(request, "apps/core/automated_email_form.html", context)
+
+def _generate_report_for_automated_email(tenant, report_key, start_date, end_date):
+    """
+    Otomatik mail için rapor oluşturur ve Excel bytes döndürür
+    Returns: (filename, excel_bytes)
+    """
+    from datetime import date
+    from apps.field_operations.models import VisitTask
+    from apps.field_operations.views import (
+        _visit_detail_report_columns, _task_to_report_value,
+        _build_user_and_hierarchy_maps
+    )
+    from apps.core.excel_utils import xlsx_from_rows
+    from django.db.models import Count, Min, Max, Q
+    from django.utils import timezone
+    
+    if report_key == 'visit_detail':
+        # Ziyaret Detay Raporu
+        cols, label_by_key = _visit_detail_report_columns()
+        selected_cols = [
+            "answer_id", "customer_code", "customer_name",
+            "visit_start_date", "visit_start_time", "visit_end_date",
+            "visit_end_time", "visit_duration_min"
+        ]
+        
+        qs = VisitTask.objects.select_related("customer", "customer__cari").filter(tenant=tenant)
+        qs = qs.exclude(check_in_time__isnull=True)
+        if start_date and end_date:
+            qs = qs.filter(check_in_time__date__gte=start_date, check_in_time__date__lte=end_date)
+        qs = qs.order_by("-check_in_time", "-id")
+        
+        usernames = list(qs.values_list("merch_code", flat=True).distinct())
+        user_fullname_by_username, hierarchy_parent_by_username = _build_user_and_hierarchy_maps(usernames)
+        
+        rows = []
+        for t in qs:
+            rows.append({
+                k: _task_to_report_value(
+                    t, k,
+                    user_fullname_by_username=user_fullname_by_username,
+                    hierarchy_parent_by_username=hierarchy_parent_by_username,
+                )
+                for k in selected_cols
+            })
+        
+        excel_bytes = xlsx_from_rows(rows, sheet_name="Ziyaret Detay Raporu", header_order=selected_cols, label_by_key=label_by_key)
+        return ("Ziyaret_Detay_Raporu.xlsx", excel_bytes)
+    
+    elif report_key == 'daily_summary':
+        # Günlük Özet Raporu
+        qs = VisitTask.objects.select_related("customer").filter(tenant=tenant, planned_date__gte=start_date, planned_date__lte=end_date)
+        
+        stats_qs = (
+            qs.values("merch_code", "planned_date")
+            .annotate(
+                planned=Count("id"),
+                completed=Count("id", filter=Q(status="completed")),
+                store_count=Count("customer_id", distinct=True),
+            )
+            .order_by("planned_date", "merch_code")
+        )
+        
+        all_merchs = [r["merch_code"] for r in stats_qs if r.get("merch_code")]
+        full_by_username, _ = _build_user_and_hierarchy_maps(all_merchs)
+        
+        rows = []
+        for r in stats_qs:
+            merch = r.get("merch_code") or ""
+            planned_date = r.get("planned_date")
+            rows.append({
+                "Tarih": planned_date.strftime("%d.%m.%Y") if planned_date else "",
+                "Personel": merch,
+                "Personel Adı": full_by_username.get(merch, "") or merch,
+                "Planlanan": int(r.get("planned") or 0),
+                "Tamamlanan": int(r.get("completed") or 0),
+                "Mağaza Sayısı": int(r.get("store_count") or 0),
+            })
+        
+        excel_bytes = xlsx_from_rows(rows, sheet_name="Günlük Özet")
+        return ("Gunluk_Ozet_Raporu.xlsx", excel_bytes)
+    
+    # Müşteri Listesi ve Rota Planı kaldırıldı - Sadece "Raporlar" bölümündeki raporlar gönderilir
+    
+    elif report_key.startswith('survey_'):
+        # Anket Raporu (ReportRecord sisteminden)
+        from django.contrib.contenttypes.models import ContentType
+        from apps.forms.models import Survey, SurveyAnswer
+        
+        try:
+            survey_id = int(report_key.replace('survey_', ''))
+            survey = Survey.objects.get(id=survey_id, tenant=tenant)
+        except (Survey.DoesNotExist, ValueError) as e:
+            print(f"[ERROR] Survey not found or invalid ID: {report_key}, error: {str(e)}")
+            return None
+        
+        # Survey raporu için mevcut export fonksiyonunu kullan
+        try:
+            from apps.field_operations.views import (
+                _survey_report_columns, _task_to_survey_report_value,
+                _build_user_and_hierarchy_maps
+            )
+            
+            print(f"[DEBUG] Generating survey report for survey_id: {survey_id}, title: {survey.title}")
+            
+            cols, label_by_key = _survey_report_columns(survey)
+            qs = (
+                VisitTask.objects.select_related("customer")
+                .filter(tenant=tenant, answers__question__survey=survey)
+                .exclude(check_in_time__isnull=True)
+                .distinct()
+            )
+            
+            print(f"[DEBUG] Base queryset count: {qs.count()}")
+            
+            if start_date and end_date:
+                qs = qs.filter(check_in_time__date__gte=start_date, check_in_time__date__lte=end_date)
+                print(f"[DEBUG] After date filter: {qs.count()}")
+            
+            qs = qs.order_by("-check_in_time", "-id")
+            
+            task_ids = list(qs.values_list("id", flat=True))
+            print(f"[DEBUG] Task IDs found: {len(task_ids)}")
+            
+            if not task_ids:
+                print(f"[WARNING] No tasks found for survey {survey_id} in date range {start_date} to {end_date}")
+                # Boş rapor oluştur - ama tüm kolonları ekle
+                rows = []
+                selected_cols = ["answer_id", "customer_code", "customer_name", "personel"]
+                q_cols = [c["key"] for c in cols if c["key"].startswith("q_")]
+                selected_cols.extend(q_cols)
+                
+                # Boş rapor için Excel oluştur (başlıklar doğru görünsün)
+                excel_bytes = xlsx_from_rows(
+                    rows, 
+                    sheet_name=survey.title[:31], 
+                    header_order=selected_cols,
+                    label_by_key=label_by_key  # Başlıkları label'larla değiştir
+                )
+                print(f"[DEBUG] Empty survey report Excel created with columns: {selected_cols}")
+                return (f"Anket_{survey.title[:20]}.xlsx", excel_bytes)
+            else:
+                answers = (
+                    SurveyAnswer.objects.select_related("question")
+                    .filter(task_id__in=task_ids, question__survey=survey)
+                    .order_by("task_id", "question_id", "id")
+                )
+                
+                print(f"[DEBUG] Answers found: {answers.count()}")
+                
+                bucket = {}
+                for a in answers:
+                    tid = a.task_id
+                    qid = a.question_id
+                    val = ""
+                    if a.answer_text:
+                        val = str(a.answer_text).strip()
+                    elif a.answer_photo:
+                        try:
+                            val = a.answer_photo.url
+                        except:
+                            val = str(a.answer_photo)
+                    if val:
+                        bucket.setdefault((tid, qid), []).append(val)
+                answers_map = {k: " | ".join(v) for k, v in bucket.items()}
+                
+                usernames = list(qs.values_list("merch_code", flat=True).distinct())
+                user_fullname_by_username, hierarchy_parent_by_username = _build_user_and_hierarchy_maps(usernames)
+                
+                selected_cols = ["answer_id", "customer_code", "customer_name", "personel"]
+                q_cols = [c["key"] for c in cols if c["key"].startswith("q_")]
+                selected_cols.extend(q_cols)
+                
+                rows = []
+                for t in qs:
+                    row = {
+                        k: _task_to_survey_report_value(
+                            t, k,
+                            answers_map=answers_map,
+                            user_fullname_by_username=user_fullname_by_username,
+                            hierarchy_parent_by_username=hierarchy_parent_by_username,
+                        )
+                        for k in selected_cols
+                    }
+                    rows.append(row)
+            
+            excel_bytes = xlsx_from_rows(
+                rows, 
+                sheet_name=survey.title[:31], 
+                header_order=selected_cols,
+                label_by_key=label_by_key  # Başlıkları label'larla değiştir
+            )
+            print(f"[DEBUG] Survey report Excel created: {len(excel_bytes)} bytes")
+            print(f"[DEBUG] Columns: {selected_cols}")
+            print(f"[DEBUG] Labels: {[label_by_key.get(k, k) for k in selected_cols]}")
+            return (f"Anket_{survey.title[:20]}.xlsx", excel_bytes)
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"[ERROR] Survey report generation error: {error_trace}")
+            raise  # Exception'ı yukarı fırlat ki ana fonksiyonda yakalansın
+    
+    return None
+
+def _update_email_settings_from_db_for_tenant(tenant):
+    """Email ayarlarını veritabanından yükleyip Django settings'e ekle (TENANT-SPECIFIC)"""
+    try:
+        from django.conf import settings
+        from apps.core.models import SystemSetting
+        
+        # Veritabanından email ayarlarını oku (tenant'a özel)
+        email_settings = {}
+        settings_qs = SystemSetting.objects.filter(category='email', tenant=tenant)
+        
+        # Tenant için email ayarları yoksa, Rotexia şablonunu kullan
+        if not settings_qs.exists():
+            print(f"[WARNING] Tenant ({tenant.name}) için email ayarları bulunamadı, Rotexia şablonu kullanılıyor.")
+            settings_qs = SystemSetting.objects.filter(category='email', tenant__isnull=True)
+        
+        for setting in settings_qs:
+            key = setting.key.replace('email_', '')
+            email_settings[key] = setting.value
+        
+        # Veritabanındaki ayarları her zaman Django settings'e yükle (tenant'a özel ayarlar öncelikli)
+        if email_settings.get('host'):
+            settings.EMAIL_HOST = email_settings.get('host', '')
+        
+        if email_settings.get('host_user'):
+            settings.EMAIL_HOST_USER = email_settings.get('host_user', '')
+        
+        if email_settings.get('host_password'):
+            # Password'ü trim et (baş/son boşlukları temizle)
+            password = email_settings.get('host_password', '').strip()
+            settings.EMAIL_HOST_PASSWORD = password
+        
+        if email_settings.get('port'):
+            try:
+                settings.EMAIL_PORT = int(email_settings.get('port', '587'))
+            except:
+                settings.EMAIL_PORT = 587
+        
+        # TLS/SSL ayarları - Outlook/Hotmail için özel kontrol
+        use_tls = email_settings.get('use_tls', 'True').lower() == 'true'
+        
+        # Outlook/Hotmail için özel ayarlar
+        if 'outlook.com' in settings.EMAIL_HOST or 'office365.com' in settings.EMAIL_HOST:
+            settings.EMAIL_USE_TLS = True  # STARTTLS kullan (587 port için)
+            settings.EMAIL_USE_SSL = False  # SSL kullanma
+            if settings.EMAIL_PORT == 465:
+                settings.EMAIL_PORT = 587  # Outlook için 587 port kullan (STARTTLS için)
+        else:
+            settings.EMAIL_USE_TLS = use_tls
+            settings.EMAIL_USE_SSL = False
+        
+        # DEFAULT_FROM_EMAIL ayarla - her zaman veritabanından alınan değeri kullan
+        default_from_email_value = email_settings.get('default_from_email', '').strip()
+        if default_from_email_value:
+            settings.DEFAULT_FROM_EMAIL = default_from_email_value
+        else:
+            # Veritabanında yoksa veya boşsa varsayılan değer kullan
+            settings.DEFAULT_FROM_EMAIL = 'noreply@rotexia.com'
+        
+        # Debug: Ayarları logla
+        print(f"[DEBUG] Email settings loaded for tenant: {tenant.name}")
+        print(f"[DEBUG]   EMAIL_HOST: {getattr(settings, 'EMAIL_HOST', 'Not set')}")
+        print(f"[DEBUG]   EMAIL_PORT: {getattr(settings, 'EMAIL_PORT', 'Not set')}")
+        print(f"[DEBUG]   EMAIL_USE_TLS: {getattr(settings, 'EMAIL_USE_TLS', 'Not set')}")
+        print(f"[DEBUG]   EMAIL_HOST_USER: {getattr(settings, 'EMAIL_HOST_USER', 'Not set')}")
+        print(f"[DEBUG]   DEFAULT_FROM_EMAIL: {getattr(settings, 'DEFAULT_FROM_EMAIL', 'Not set')}")
+        print(f"[DEBUG]   EMAIL_HOST_PASSWORD: {'***' + getattr(settings, 'EMAIL_HOST_PASSWORD', '')[-4:] if getattr(settings, 'EMAIL_HOST_PASSWORD', '') else 'Not set'}")
+        
+        # Email backend'i belirle
+        if settings.EMAIL_HOST and settings.EMAIL_HOST_USER and settings.EMAIL_HOST_PASSWORD:
+            settings.EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+            print(f"[DEBUG] Using SMTP backend")
+        else:
+            settings.EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+            print(f"[WARNING] Using console backend - missing settings")
+        
+    except Exception as e:
+        print(f"[WARNING] Email settings from DB could not be loaded: {str(e)}")
+
+def _merge_excel_reports(reports_list):
+    """
+    Birden fazla Excel raporunu tek bir Excel dosyasında birleştirir (her biri ayrı sheet)
+    reports_list: [(filename, excel_bytes), ...]
+    Returns: merged_excel_bytes
+    """
+    from openpyxl import load_workbook, Workbook
+    from io import BytesIO
+    
+    if not reports_list:
+        return None
+    
+    if len(reports_list) == 1:
+        return reports_list[0][1]
+    
+    wb_merged = Workbook()
+    wb_merged.remove(wb_merged.active)  # Varsayılan sheet'i kaldır
+    
+    for filename, excel_bytes in reports_list:
+        wb = load_workbook(BytesIO(excel_bytes))
+        for ws in wb.worksheets:
+            ws_copy = wb_merged.create_sheet(title=ws.title[:31])
+            for row in ws.iter_rows():
+                ws_copy.append([cell.value for cell in row])
+    
+    out = BytesIO()
+    wb_merged.save(out)
+    return out.getvalue()
+
+def _send_automated_email(automated_email, force=False):
+    """
+    Otomatik maili gönderir
+    force=True ise zamanlama kontrolü yapmaz
+    """
+    from django.utils import timezone
+    from django.core.mail import EmailMessage
+    from datetime import datetime, date, timedelta
+    import pytz
+    
+    # Türkiye saat dilimine göre kontrol et (UTC+3)
+    turkey_tz = pytz.timezone('Europe/Istanbul')
+    now = timezone.now()  # UTC zaman (last_sent_at için)
+    now_turkey = now.astimezone(turkey_tz)  # Türkiye saati (zamanlama kontrolü için)
+    today = now_turkey.date()
+    current_time_turkey = now_turkey.time()
+    
+    # Zamanlama kontrolü (force=False ise)
+    if not force:
+        # Gönderim başlangıç tarihi kontrolü
+        if automated_email.send_start_date > today:
+            return False, "Gönderim başlangıç tarihi henüz gelmedi"
+        
+        # Gönderim bitiş tarihi kontrolü
+        if automated_email.send_end_date and automated_email.send_end_date < today:
+            return False, "Gönderim bitiş tarihi geçti"
+        
+        # Periyot ve gün kontrolü
+        if automated_email.period == 'daily':
+            if automated_email.day_option != 'every_day':
+                return False, "Günlük periyot için sadece 'Her Gün' seçilebilir"
+            # Saat kontrolü - Türkiye saatine göre kontrol et
+            send_time = automated_email.send_time
+            if send_time:
+                from datetime import datetime
+                send_datetime = datetime.combine(today, send_time)
+                now_datetime = datetime.combine(today, current_time_turkey)
+                
+                print(f"[DEBUG] Gönderim kontrolü (Türkiye Saati) - Şimdi: {now_datetime.strftime('%Y-%m-%d %H:%M')}, Gönderim saati: {send_datetime.strftime('%Y-%m-%d %H:%M')}")
+                
+                if now_datetime < send_datetime:
+                    return False, f"Gönderim saati henüz gelmedi (Gönderim saati: {send_time.strftime('%H:%M')} TSİ, Şimdi: {current_time_turkey.strftime('%H:%M')} TSİ)"
+                # Gönderim saati geçtiyse ve bugün gönderilmediyse, gönder
+                # (5 dakika tolerans yok, sadece gönderim saatinden sonra olması yeterli)
+        
+        elif automated_email.period == 'weekly':
+            if today.weekday() != 0:  # Pazartesi = 0
+                return False, "Haftalık periyot sadece pazartesi günleri gönderilir"
+            if automated_email.day_option != 'monday':
+                return False, "Haftalık periyot için 'Her Pazartesi' seçilmelidir"
+            send_time = automated_email.send_time
+            if send_time:
+                from datetime import datetime
+                send_datetime = datetime.combine(today, send_time)
+                now_datetime = datetime.combine(today, current_time_turkey)
+                
+                if now_datetime < send_datetime:
+                    return False, f"Gönderim saati henüz gelmedi (Gönderim saati: {send_time.strftime('%H:%M')} TSİ, Şimdi: {current_time_turkey.strftime('%H:%M')} TSİ)"
+        
+        elif automated_email.period == 'monthly':
+            if today.day != 1:
+                return False, "Aylık periyot sadece ayın ilk günü gönderilir"
+            if automated_email.day_option != 'first_of_month':
+                return False, "Aylık periyot için 'Her Ayın İlk Günü' seçilmelidir"
+            send_time = automated_email.send_time
+            if send_time:
+                from datetime import datetime
+                send_datetime = datetime.combine(today, send_time)
+                now_datetime = datetime.combine(today, current_time_turkey)
+                
+                if now_datetime < send_datetime:
+                    return False, f"Gönderim saati henüz gelmedi (Gönderim saati: {send_time.strftime('%H:%M')} TSİ, Şimdi: {current_time_turkey.strftime('%H:%M')} TSİ)"
+        
+        # NOT: "Her Gün" periyotunda günde bir kez kontrolü YOK
+        # Kullanıcı saati değiştirebilir ve istediği zaman gönderebilir
+        # Sadece gönderim saatinden sonra olması yeterli
+    
+    # Raporları oluştur
+    selected_reports = automated_email.selected_reports or {}
+    active_reports = [k for k, v in selected_reports.items() if v]
+    
+    print(f"[DEBUG] Active reports: {active_reports}")
+    print(f"[DEBUG] Selected reports dict: {selected_reports}")
+    
+    if not active_reports:
+        return False, "Hiç rapor seçilmemiş. Lütfen 'Raporlar' bölümünden en az bir rapor seçin."
+    
+    reports_list = []
+    errors = []
+    
+    for report_key in active_reports:
+        
+        try:
+            print(f"[DEBUG] Generating report: {report_key}")
+            result = _generate_report_for_automated_email(
+                automated_email.tenant,
+                report_key,
+                automated_email.report_start_date,
+                automated_email.report_end_date
+            )
+            if result:
+                reports_list.append(result)
+                print(f"[DEBUG] Report generated successfully: {report_key}")
+            else:
+                errors.append(f"Rapor oluşturulamadı: {report_key}")
+                print(f"[DEBUG] Report generation returned None: {report_key}")
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            error_msg = f"Rapor oluşturma hatası ({report_key}): {str(e)}"
+            errors.append(error_msg)
+            print(f"[ERROR] Report generation error ({report_key}): {error_trace}")
+            continue
+    
+    if not reports_list:
+        error_message = "Hiç rapor oluşturulamadı. "
+        if errors:
+            error_message += "Hatalar: " + "; ".join(errors[:3])
+        return False, error_message
+    
+    # Raporları birleştir veya ayrı gönder
+    if automated_email.merge_reports:
+        # Tek dosya, birden fazla sheet
+        excel_content = _merge_excel_reports(reports_list)
+        attachment_filename = f"Raporlar_{today.strftime('%Y%m%d')}.xlsx"
+        attachments = [(attachment_filename, excel_content, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')]
+    else:
+        # Her rapor ayrı dosya
+        attachments = []
+        for filename, excel_bytes in reports_list:
+            attachments.append((filename, excel_bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'))
+    
+    # Mail gönder
+    try:
+        from django.conf import settings
+        from django.core import mail
+        
+        # Email ayarlarını veritabanından yükle (TENANT-SPECIFIC)
+        tenant = automated_email.tenant
+        _update_email_settings_from_db_for_tenant(tenant)
+        
+        to_emails = [e.strip() for e in automated_email.to_email.split(',') if e.strip()]
+        cc_emails = [e.strip() for e in automated_email.cc_email.split(',') if e.strip()] if automated_email.cc_email else []
+        
+        email_host = getattr(settings, 'EMAIL_HOST', '')
+        email_port = getattr(settings, 'EMAIL_PORT', '')
+        email_user = getattr(settings, 'EMAIL_HOST_USER', '')
+        
+        print(f"[DEBUG] Sending email to: {to_emails}")
+        print(f"[DEBUG] Email backend: {getattr(settings, 'EMAIL_BACKEND', 'Not set')}")
+        print(f"[DEBUG] Email host: {email_host}")
+        print(f"[DEBUG] Email port: {email_port}")
+        print(f"[DEBUG] Email user: {email_user}")
+        
+        if not to_emails:
+            return False, "Geçerli e-posta adresi bulunamadı"
+        
+        # SMTP ayar kontrolü
+        if not email_host:
+            return False, "SMTP sunucu adresi bulunamadı. Lütfen ayarlardan 'SMTP Sunucu' alanını doldurun (örn: smtp-mail.outlook.com, smtp.gmail.com)"
+        
+        # Email adresi gibi görünen SMTP sunucu kontrolü
+        if '@' in email_host:
+            return False, f"❌ HATA: SMTP Sunucu alanına email adresi girilmiş! '{email_host}' bir email adresidir, SMTP sunucu adresi değildir. Lütfen ayarlardan 'SMTP Sunucu' alanını düzeltin: Hotmail için 'smtp-mail.outlook.com', Gmail için 'smtp.gmail.com' girin."
+        
+        # From email ayarla - Sistemde belirtilen "Gönderen E-posta" ayarını kullan
+        default_from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', None)
+        
+        # "Gönderen E-posta" ayarı varsa, onu kullan (kullanıcının belirttiği email)
+        if default_from_email and default_from_email.strip():
+            from_email = default_from_email.strip()
+        else:
+            # "Gönderen E-posta" ayarı yoksa veya boşsa, EMAIL_HOST_USER kullan
+            from_email = email_user
+        
+        # Outlook/Hotmail için özel kontrol: SMTP server bazı durumlarda from_email'in 
+        # EMAIL_HOST_USER ile aynı olmasını gerektirebilir, ama kullanıcı farklı belirtmişse
+        # kullanıcının tercihini kullanmayı deneyelim
+        # (Eğer hata alırsa, kullanıcı EMAIL_HOST_USER ile aynı yapmalı)
+        
+        print(f"[DEBUG] Using from_email: {from_email} (EMAIL_HOST_USER: {email_user}, DEFAULT_FROM_EMAIL: {default_from_email})")
+        
+        email = EmailMessage(
+            subject=automated_email.subject,
+            body=automated_email.body,
+            from_email=from_email,
+            to=to_emails,
+            cc=cc_emails if cc_emails else None,
+        )
+        
+        print(f"[DEBUG] Attaching {len(attachments)} files")
+        for filename, content, content_type in attachments:
+            email.attach(filename, content, content_type)
+            print(f"[DEBUG] Attached: {filename} ({len(content)} bytes)")
+        
+        # Email backend kontrolü
+        email_backend = getattr(settings, 'EMAIL_BACKEND', '')
+        if 'console' in email_backend:
+            print(f"[WARNING] EMAIL_BACKEND console modunda - Mail gerçekten gönderilmiyor, sadece console'a yazdırılıyor!")
+        
+        email.send()
+        
+        print(f"[DEBUG] Email.send() called successfully")
+        
+        # last_sent_at güncelle
+        automated_email.last_sent_at = now
+        automated_email.save(update_fields=['last_sent_at'])
+        
+        backend_info = ""
+        if 'console' in email_backend:
+            backend_info = " (Console modu - mail gerçekten gönderilmedi, terminal/console'a yazdırıldı)"
+        
+        return True, f"Mail başarıyla gönderildi ({len(attachments)} dosya){backend_info}"
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"[ERROR] Email send exception: {error_trace}")
+        
+        # Daha açıklayıcı hata mesajı
+        error_msg = str(e)
+        email_host = getattr(settings, 'EMAIL_HOST', '')
+        
+        if 'getaddrinfo' in error_msg or '11003' in error_msg:
+            if '@' in email_host:
+                return False, f"❌ SMTP Sunucu hatası: '{email_host}' bir email adresidir, sunucu adresi değildir! Lütfen ayarlardan 'SMTP Sunucu' alanını düzeltin. Hotmail için: smtp-mail.outlook.com, Gmail için: smtp.gmail.com"
+            else:
+                return False, f"❌ SMTP sunucu adresi çözümlenemedi: '{email_host}'. Lütfen ayarlardan 'SMTP Sunucu' alanını kontrol edin. Doğru sunucu adresi: Hotmail için 'smtp-mail.outlook.com', Gmail için 'smtp.gmail.com'"
+        
+        # Hotmail/Outlook authentication hatası için özel mesaj
+        if '535' in error_msg and ('authentication' in error_msg.lower() or 'basic authentication is disabled' in error_msg.lower() or 'basic authentication' in error_msg.lower()):
+            email_user = getattr(settings, 'EMAIL_HOST_USER', '')
+            email_pass = getattr(settings, 'EMAIL_HOST_PASSWORD', '') or ''
+            email_pass_length = len(email_pass)
+            
+            # Şifre son 4 karakterini göster (debug için)
+            pass_preview = email_pass[-4:] if email_pass_length >= 4 else '***'
+            
+            detailed_msg = f"❌ Kimlik doğrulama hatası (535): SMTP sunucusu giriş bilgilerinizi kabul etmiyor.\n\n"
+            detailed_msg += f"Kullanılan ayarlar:\n"
+            detailed_msg += f"• SMTP Sunucu: {email_host}\n"
+            detailed_msg += f"• SMTP Port: {getattr(settings, 'EMAIL_PORT', 'Not set')}\n"
+            detailed_msg += f"• TLS: {getattr(settings, 'EMAIL_USE_TLS', 'Not set')}\n"
+            detailed_msg += f"• SMTP Kullanıcı: {email_user}\n"
+            detailed_msg += f"• Şifre uzunluğu: {email_pass_length} karakter\n"
+            detailed_msg += f"• Şifre son 4 karakter: ...{pass_preview}\n\n"
+            
+            detailed_msg += f"Çözüm önerileri:\n"
+            detailed_msg += f"1. 🔄 YENİ bir App Password oluşturun (eski şifre geçersiz olabilir)\n"
+            detailed_msg += f"   → https://account.microsoft.com/security/app-passwords\n"
+            detailed_msg += f"2. ✅ Yeni App Password'ü 'SMTP Şifresi' alanına girin\n"
+            detailed_msg += f"3. ✅ Normal şifrenizi DEĞİL, App Password'ü kullanın\n"
+            detailed_msg += f"4. 🔄 SMTP Sunucu'yu 'smtp.office365.com' deneyin (smtp-mail.outlook.com yerine)\n"
+            detailed_msg += f"5. ✅ Ayarları kaydedin ve tekrar deneyin\n\n"
+            
+            detailed_msg += f"\n⚠️ KRİTİK SORUN: 'basic authentication is disabled' hatası alıyorsanız, Microsoft hesabınız Modern Authentication modunda olabilir.\n"
+            detailed_msg += f"Bu durumda App Password çalışmaz. Çözüm seçenekleri:\n"
+            detailed_msg += f"1. 📧 Gmail kullanın (App Password ile çalışır) - ÖNERİLEN\n"
+            detailed_msg += f"   → SMTP: smtp.gmail.com, Port: 587, TLS: Açık\n"
+            detailed_msg += f"2. 📧 Başka bir email servis sağlayıcısı kullanın\n"
+            detailed_msg += f"3. 🔐 OAuth2 implementasyonu gerekiyor (geliştirici desteği gerekir)\n\n"
+            detailed_msg += f"💡 ÖNERİ: Gmail hesabı oluşturup App Password ile kullanın. Hotmail/Outlook hesabı Modern Auth modunda olduğu için SMTP Basic Auth desteklemiyor."
+            
+            return False, detailed_msg
+        
+        return False, f"Mail gönderme hatası: {error_msg}"
+
+@login_required
+def automated_email_send_now(request, pk):
+    """Otomatik maili manuel olarak şimdi gönder"""
+    automated_email = get_object_or_404(AutomatedEmail, pk=pk)
+    
+    is_root = is_root_admin(request.user)
+    if not is_root and automated_email.tenant != _resolve_tenant_for_automated_email(request):
+        messages.error(request, "Bu otomatik maili gönderme yetkiniz yok.")
+        return redirect("automated_email_list")
+    
+    if request.method == "POST":
+        try:
+            import traceback
+            print(f"[DEBUG] Starting mail send for: {automated_email.subject}")
+            print(f"[DEBUG] Selected reports: {automated_email.selected_reports}")
+            
+            success, message = _send_automated_email(automated_email, force=True)
+            
+            if success:
+                messages.success(request, message)
+                print(f"[DEBUG] Mail sent successfully: {message}")
+            else:
+                messages.error(request, f"Mail gönderilemedi: {message}")
+                print(f"[DEBUG] Mail send failed: {message}")
+        except Exception as e:
+            error_trace = traceback.format_exc()
+            error_msg = f"Mail gönderilirken hata oluştu: {str(e)}"
+            print(f"[ERROR] Exception in send_now: {error_trace}")
+            messages.error(request, error_msg)
+    
+    return redirect("automated_email_list")
+
+@login_required
+def automated_email_delete(request, pk):
+    automated_email = get_object_or_404(AutomatedEmail, pk=pk)
+    
+    is_root = is_root_admin(request.user)
+    if not is_root and automated_email.tenant != _resolve_tenant_for_automated_email(request):
+        messages.error(request, "Bu otomatik maili silme yetkiniz yok.")
+        return redirect("automated_email_list")
+    
+    if request.method == "POST":
+        automated_email.delete()
+        messages.success(request, "Otomatik mail başarıyla silindi.")
+        return redirect("automated_email_list")
+    
+    return redirect("automated_email_list")

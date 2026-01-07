@@ -82,7 +82,7 @@ class TenantMiddleware(MiddlewareMixin):
             request.tenant = None
             return None
         
-        # Development modu (localhost) - Session'dan tenant yükle
+            # Development modu (localhost) - Session'dan tenant yükle
         # Sadece admin panelinde değilsek session'dan tenant yükle
         # Root admin ise ve admin panelindeyse tenant yüklenmemeli
         is_root_admin_user = False
@@ -107,17 +107,17 @@ class TenantMiddleware(MiddlewareMixin):
                 request.tenant = None
                 return None
         
-        tenant_id = request.session.get('tenant_id') or request.session.get('connect_tenant_id')
-        
-        if tenant_id:
-            try:
-                tenant = Tenant.objects.get(id=tenant_id, is_active=True)
-                request.tenant = tenant
-            except Tenant.DoesNotExist:
-                request.session.pop('tenant_id', None)
-                request.session.pop('connect_tenant_id', None)
+            tenant_id = request.session.get('tenant_id') or request.session.get('connect_tenant_id')
+            
+            if tenant_id:
+                try:
+                    tenant = Tenant.objects.get(id=tenant_id, is_active=True)
+                    request.tenant = tenant
+                except Tenant.DoesNotExist:
+                    request.session.pop('tenant_id', None)
+                    request.session.pop('connect_tenant_id', None)
+                    request.tenant = None
+            else:
                 request.tenant = None
-        else:
-            request.tenant = None
         
         return None

@@ -63,12 +63,29 @@ def ensure_root_admin_configured(user: User) -> None:
 
 
 def is_root_admin(user: User) -> bool:
+    """
+    Root admin kontrolü:
+    - Root admin, SystemSetting'te root_admin_user_id olarak kayıtlı kullanıcıdır
+    - VEYA tenant'ı olmayan superuser'dır (Rotexia ana admin)
+    - Tenant'a bağlı superuser'lar (pasteladmin gibi) root admin DEĞİLDİR!
+    """
     if not getattr(user, "is_authenticated", False):
         return False
+    
+    # Tenant kontrolü: Tenant'ı olan kullanıcılar kesinlikle root admin değildir
+    if hasattr(user, 'tenant') and user.tenant is not None:
+        return False
+    
+    # SystemSetting'te kayıtlı root admin kontrolü
+    root = get_root_admin_user()
+    if root and root.id == user.id:
+        return True
+    
+    # Tenant'ı olmayan superuser ise root admin'dir (Rotexia ana admin)
     if getattr(user, "is_superuser", False):
         return True
-    root = get_root_admin_user()
-    return bool(root and root.id == user.id)
+    
+    return False
 
 
 def get_assigned_user_ids_under_admin_node() -> set[int]:

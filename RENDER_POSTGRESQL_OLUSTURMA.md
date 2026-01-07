@@ -85,3 +85,7 @@ Detaylı rehber: `RENDER_ADIM_ADIM.md`
 
 
 
+
+
+
+

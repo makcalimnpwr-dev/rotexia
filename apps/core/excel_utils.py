@@ -12,10 +12,17 @@ def xlsx_from_rows(
     *,
     sheet_name: str = "Sheet1",
     header_order: list[str] | None = None,
+    label_by_key: dict[str, str] | None = None,
 ) -> bytes:
     """
     Create an XLSX file from a list of dict rows (keys -> columns).
     Returns bytes.
+    
+    Args:
+        rows: List of dict rows
+        sheet_name: Name of the Excel sheet
+        header_order: Optional list of column keys in desired order
+        label_by_key: Optional dict mapping column keys to display labels (e.g., {'q_17': 'Stand var mı?'})
     """
     wb = Workbook()
     ws = wb.active
@@ -37,7 +44,15 @@ def xlsx_from_rows(
                     keys.append(k)
                     seen.add(k)
 
-    ws.append(keys)
+    # Convert keys to labels if label_by_key is provided
+    headers = []
+    if label_by_key:
+        for key in keys:
+            headers.append(label_by_key.get(key, key))
+    else:
+        headers = keys
+
+    ws.append(headers)
     for r in rows:
         ws.append([r.get(k, "") for k in keys])
 
@@ -86,6 +101,9 @@ def xlsx_to_rows(file_obj) -> list[dict[str, Any]]:
             continue
         out.append(d)
     return out
+
+
+
 
 
 

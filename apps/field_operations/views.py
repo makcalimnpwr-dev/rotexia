@@ -123,10 +123,10 @@ def task_list(request):
     # Artık sildiğin görevler hortlamayacak.
 
     # Admin panelindeyken tüm görevleri göster (tenant filtresi yok)
-    if is_root_admin(request.user) and is_admin_panel_path:
-        tasks = VisitTask.objects.all().select_related('customer', 'visit_type').order_by('planned_date')
-    else:
-        tasks = filter_by_tenant(VisitTask.objects.all(), request).select_related('customer', 'visit_type').order_by('planned_date')
+    base_qs = VisitTask.objects.all()
+    if not (is_root_admin(request.user) and is_admin_panel_path):
+        base_qs = filter_by_tenant(base_qs, request)
+    tasks = base_qs.select_related('customer', 'visit_type').order_by('planned_date')
 
     # Hiyerarşi bazlı yetkilendirme: Admin değilse sadece kendi + altının görevleri
     scope = get_hierarchy_scope_for_user(request.user, include_self=True)
@@ -1282,12 +1282,20 @@ def _default_daily_summary_headers() -> dict:
     }
 
 
-def _get_report_trash_retention_days() -> int:
+def _get_report_trash_retention_days(request=None, tenant=None) -> int:
     """
-    Global retention days (stored in SystemSetting as a number).
+    Tenant-specific retention days (stored in SystemSetting as a number).
     """
+    from apps.core.tenant_utils import get_current_tenant
+    
+    # Tenant bilgisini al
+    if tenant is None and request is not None:
+        tenant = get_current_tenant(request)
+    
+    # Tenant yoksa (root admin), Rotexia şablonunu kullan
     s, _ = SystemSetting.objects.get_or_create(
         key=REPORT_TRASH_RETENTION_KEY,
+        tenant=tenant,  # Tenant'a özel veya None (Rotexia şablonu)
         defaults={
             "label": "Silinecek Gün Sayısı",
             "value": str(DEFAULT_REPORT_TRASH_RETENTION_DAYS),
@@ -1303,13 +1311,21 @@ def _get_report_trash_retention_days() -> int:
         return DEFAULT_REPORT_TRASH_RETENTION_DAYS
 
 
-def _set_report_trash_retention_days(days: int) -> int:
+def _set_report_trash_retention_days(days: int, request=None, tenant=None) -> int:
+    from apps.core.tenant_utils import get_current_tenant
+    
     if days < 0:
         days = 0
     if days > 3650:
         days = 3650
+    
+    # Tenant bilgisini al
+    if tenant is None and request is not None:
+        tenant = get_current_tenant(request)
+    
     SystemSetting.objects.update_or_create(
         key=REPORT_TRASH_RETENTION_KEY,
+        tenant=tenant,  # Tenant'a özel veya None (Rotexia şablonu)
         defaults={
             "label": "Silinecek Gün Sayısı",
             "value": str(days),
@@ -1326,7 +1342,7 @@ def _purge_old_deleted_reports(request) -> int:
     Deletes report records from DB if they stayed in trash longer than retention days.
     Returns number of deleted records.
     """
-    retention = _get_report_trash_retention_days()
+    retention = _get_report_trash_retention_days(request)
     if retention <= 0:
         # 0 => keep none in trash; allow immediate purge of already deleted
         cutoff = timezone.now()
@@ -2314,7 +2330,7 @@ def survey_report_import(request, survey_id: int):
 @login_required
 def reports_trash(request):
     purged = _purge_old_deleted_reports(request)
-    retention = _get_report_trash_retention_days()
+    retention = _get_report_trash_retention_days(request)
 
     qs = filter_by_tenant(ReportRecord.objects.filter(deleted_at__isnull=False), request).order_by("-deleted_at")
     rows = []
@@ -2346,7 +2362,7 @@ def reports_trash_settings(request):
         days = int(raw)
     except Exception:
         days = DEFAULT_REPORT_TRASH_RETENTION_DAYS
-    _set_report_trash_retention_days(days)
+    _set_report_trash_retention_days(days, request)
     messages.success(request, "Silinecek gün sayısı güncellendi.")
     return redirect("reports_trash")
 
@@ -2618,56 +2634,104 @@ def import_route_plan(request):
                         day_columns[col] = day_num
             
             if not day_columns:
-                messages.error(request, "Excel'de 'Gün X' sütunları bulunamadı.")
+                messages.error(request, f"Excel'de 'Gün 1'...'Gün 28' sütunları bulunamadı. Bulunan başlıklar: {', '.join(columns[:20])}")
                 return HttpResponseRedirect(referer)
 
             merch_col = next((c for c in columns if 'Saha' in c or 'Personel' in c or 'Merch' in c), None)
             if not merch_col:
-                messages.error(request, "Personel sütunu bulunamadı.")
+                messages.error(request, "Personel sütunu bulunamadı. Beklenen örnek başlıklar: 'Saha', 'Personel' veya 'Merch'.")
                 return HttpResponseRedirect(referer)
 
+            # Müşteri eşleştirmek için en az bir sütun gerekli (Sistem ID veya Kod)
+            has_customer_id_col = any(c in columns for c in ['Sistem ID', 'Sys ID', 'Kod', 'Müşteri Kodu'])
+            if not has_customer_id_col:
+                messages.error(request, "Excel'de müşteri eşleştirmek için 'Sistem ID' veya 'Kod' (Müşteri Kodu) sütunu olmalı.")
+                return HttpResponseRedirect(referer)
+
+            # SATIR BAZLI HATA TOPLAMA
+            errors = []  # ["Satır 5: Personel 'x' bulunamadı", "Satır 12: Müşteri kodu boş"]
+            warnings = []  # ["Satır 8: 'y' kullanıcısı yetki dışında"]
             unique_merchs = []
             seen_merchs = set()
             invalid_merchs = set()
             blocked_merchs = set()
-            for r in rows:
-                v = r.get(merch_col)
-                if v is None:
-                    continue
-                s = str(v).strip()
-                if not s or s.lower() == "nan":
-                    continue
-                resolved = _resolve_merch_to_username(s)
-                r["_merch_username"] = resolved
-                if not resolved:
-                    invalid_merchs.add(s)
-                    print(f"[ROTA YÜKLEME] Geçersiz kullanıcı bulundu: '{s}' -> None")
-                    continue
-                if not _username_allowed_by_scope(scope, resolved):
-                    blocked_merchs.add(resolved)
-                    continue
-                if resolved not in seen_merchs:
-                    unique_merchs.append(resolved)
-                    seen_merchs.add(resolved)
             
-            # --- ÖNCE HATA KONTROLÜ: Eğer hiç geçerli kullanıcı yoksa işlemi durdur ---
-            if invalid_merchs:
-                invalid_list = ", ".join(list(invalid_merchs)[:5])  # İlk 5'ini göster
-                if len(invalid_merchs) > 5:
-                    invalid_list += f" ve {len(invalid_merchs) - 5} kullanıcı daha"
-                error_msg = f"❌ HATA: {len(invalid_merchs)} kullanıcı sistemde bulunamadı! ({invalid_list}) Bu kullanıcılar için rota yüklenemedi. Lütfen önce kullanıcıları oluşturun."
-                print(f"[ROTA YÜKLEME] HATA MESAJI: {error_msg}")
-                messages.error(request, error_msg)
+            # Satırları işle (satır numarası = Excel'deki gerçek satır, 1 = header, 2+ = data)
+            for row_idx, r in enumerate(rows, start=2):  # start=2 çünkü Excel'de satır 1 = header
+                row_num = row_idx  # Excel'deki satır numarası
+                
+                # Personel kontrolü
+                merch_value = r.get(merch_col)
+                if merch_value is None or not str(merch_value).strip() or str(merch_value).strip().lower() == "nan":
+                    errors.append(f"Satır {row_num}: Personel adı boş veya eksik")
+                    continue
+                
+                merch_str = str(merch_value).strip()
+                resolved_merch = _resolve_merch_to_username(merch_str)
+                
+                if not resolved_merch:
+                    invalid_merchs.add(merch_str)
+                    errors.append(f"Satır {row_num}: Personel '{merch_str}' sistemde bulunamadı")
+                    continue
+                
+                if not _username_allowed_by_scope(scope, resolved_merch):
+                    blocked_merchs.add(resolved_merch)
+                    warnings.append(f"Satır {row_num}: '{resolved_merch}' kullanıcısı yetkiniz dışında")
+                    continue
+                
+                # Müşteri kontrolü
+                raw_sys_id = str(r.get('Sistem ID') or r.get('Sys ID') or '').replace('nan', '').strip()
+                raw_code = str(r.get('Kod') or r.get('Müşteri Kodu') or '').replace('nan', '').strip()
+                
+                if not raw_sys_id and not raw_code:
+                    errors.append(f"Satır {row_num}: Müşteri bilgisi eksik (Sistem ID veya Kod boş)")
+                    continue
+                
+                customer = None
+                customer_error = None
+                
+                if raw_sys_id:
+                    clean_id = raw_sys_id.replace('G-', '').split('.')[0]
+                    if not clean_id.isdigit():
+                        errors.append(f"Satır {row_num}: Sistem ID geçersiz format ('{raw_sys_id}')")
+                        continue
+                    customer = filter_by_tenant(Customer.objects.all(), request).filter(id=int(clean_id)).first()
+                    if not customer:
+                        customer_error = f"Satır {row_num}: Sistem ID '{raw_sys_id}' ile müşteri bulunamadı"
+                
+                if not customer and raw_code:
+                    clean_code = raw_code.split('.')[0]
+                    customer = filter_by_tenant(Customer.objects.all(), request).filter(customer_code=clean_code).first()
+                    if not customer:
+                        if customer_error:
+                            customer_error = f"Satır {row_num}: Sistem ID '{raw_sys_id}' ve Kod '{raw_code}' ile müşteri bulunamadı"
+                        else:
+                            customer_error = f"Satır {row_num}: Müşteri kodu '{raw_code}' bulunamadı"
+                
+                if customer_error:
+                    errors.append(customer_error)
+                    continue
+                
+                # Bu satır geçerli, işaretle
+                r["_merch_username"] = resolved_merch
+                r["_customer"] = customer
+                if resolved_merch not in seen_merchs:
+                    unique_merchs.append(resolved_merch)
+                    seen_merchs.add(resolved_merch)
+            
+            # Hata mesajlarını göster
+            if errors:
+                preview = "<br>".join(errors[:15])  # İlk 15 hatayı göster
+                more = f"<br>... (+{len(errors)-15} hata daha)" if len(errors) > 15 else ""
+                messages.error(request, f"HATA: {len(errors)} satırda hata bulundu:<br>{preview}{more}")
                 if not unique_merchs:
-                    # Hiç geçerli kullanıcı yoksa işlemi durdur
-                    print(f"[ROTA YÜKLEME] Hiç geçerli kullanıcı yok, işlem durduruluyor.")
+                    # Hiç geçerli satır yoksa işlemi durdur
                     return HttpResponseRedirect(referer)
             
-            if blocked_merchs:
-                blocked_list = ", ".join(list(blocked_merchs)[:5])  # İlk 5'ini göster
-                if len(blocked_merchs) > 5:
-                    blocked_list += f" ve {len(blocked_merchs) - 5} kullanıcı daha"
-                messages.warning(request, f"⚠️ UYARI: {len(blocked_merchs)} kullanıcı için yetkiniz yok. ({blocked_list}) Bu kullanıcılar atlandı.")
+            if warnings:
+                preview = "<br>".join(warnings[:10])
+                more = f"<br>... (+{len(warnings)-10} uyarı daha)" if len(warnings) > 10 else ""
+                messages.warning(request, f"UYARI: {len(warnings)} satır yetki dışında atlandı:<br>{preview}{more}")
             
             success_count = 0
             task_action_count = 0
@@ -2691,23 +2755,12 @@ def import_route_plan(request):
                         r.save()
 
                     # 2. EKLEME VE GÖREV YÖNETİMİ
-                    merch_rows = [r for r in rows if r.get("_merch_username") == merch_name]
+                    # Sadece geçerli satırları işle (hatalılar zaten filtrelenmişti)
+                    merch_rows = [r for r in rows if r.get("_merch_username") == merch_name and r.get("_customer")]
                     
                     for row in merch_rows:
-                        # Müşteriyi Bul
-                        customer = None
-                        raw_sys_id = str(row.get('Sistem ID') or row.get('Sys ID') or '').replace('nan', '').strip()
-                        raw_code = str(row.get('Kod') or row.get('Müşteri Kodu') or '').replace('nan', '').strip()
-
-                        if raw_sys_id:
-                            clean_id = raw_sys_id.replace('G-', '').split('.')[0]
-                            if clean_id.isdigit():
-                                customer = filter_by_tenant(Customer.objects.all(), request).filter(id=int(clean_id)).first()
+                        customer = row.get("_customer")  # Önceden bulunmuş müşteri
                         
-                        if not customer and raw_code:
-                            clean_code = raw_code.split('.')[0]
-                            customer = filter_by_tenant(Customer.objects.all(), request).filter(customer_code=clean_code).first()
-
                         if customer:
                             route, created = filter_by_tenant(RoutePlan.objects.all(), request).get_or_create(
                                 merch_code=merch_name,
@@ -2783,15 +2836,18 @@ def import_route_plan(request):
             
             # Başarı mesajları (eğer işlem yapıldıysa)
             if task_action_count > 0:
-                messages.success(request, f"✓ İşlem Başarılı: {success_count} rota güncellendi. {task_action_count} adet görev oluşturuldu veya yeni personele transfer edildi.")
+                messages.success(request, f"İşlem Başarılı: {success_count} rota güncellendi. {task_action_count} adet görev oluşturuldu veya yeni personele transfer edildi.")
             elif success_count > 0:
-                 messages.warning(request, f"⚠️ {success_count} rota güncellendi. Görevler zaten bu personelin üzerindeydi.")
-            elif not invalid_merchs:  # Sadece geçersiz kullanıcı yoksa bu mesajı göster
-                 messages.error(request, "❌ Hiçbir kayıt güncellenemedi. Lütfen Excel dosyanızı kontrol edin.")
+                 messages.warning(request, f"{success_count} rota güncellendi. Görevler zaten bu personelin üzerindeydi.")
+            elif not errors:  # Hata yoksa ama hiçbir işlem yapılmadıysa
+                 messages.error(request, "Hiçbir kayıt güncellenemedi. Lütfen Excel dosyanızı kontrol edin.")
 
+        except UnicodeEncodeError:
+            # Windows terminal encoding: emoji vb. karakterler print/log sırasında patlayabilir
+            messages.error(request, "Rota yükleme sırasında karakter/encoding hatası oluştu. Lütfen dosyayı tekrar kaydedip yeniden deneyin.")
         except Exception as e:
             print(f"HATA: {str(e)}")
-            messages.error(request, f"Hata: {str(e)}")
+            messages.error(request, f"Rota yükleme hatası: {str(e)}")
             
     return HttpResponseRedirect(referer)
 

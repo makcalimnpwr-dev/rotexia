@@ -129,3 +129,7 @@ Tüm environment variables eklendikten sonra:
 
 
 
+
+
+
+
